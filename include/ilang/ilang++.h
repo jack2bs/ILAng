@@ -640,6 +640,13 @@ void ImportChildSynthAbstraction(const std::string& file_name, Ila& parent,
 void ExportSysCSim(const Ila& ila, const std::string& dir_path,
                    bool optimize = false);
 
+/// \brief Generate the Aladdin simulator.
+/// \param [in] ila the top-level ILA to generate.
+/// \param [in] dir_path directory path of the generated simulator.
+/// \param [in] optimize set true to enable optimization.
+void ExportAladdinSim(const Ila& ila, const std::string& dir_path,
+                   bool optimize = false);
+
 /******************************************************************************/
 // Verification.
 /******************************************************************************/

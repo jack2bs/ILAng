@@ -14,6 +14,7 @@
 #include <ilang/target-smt/smt_switch_itf.h>
 #include <ilang/util/log.h>
 #include <ilang/verilog-out/verilog_gen.h>
+#include <ilang/target-aladdin/aladdin_ilator.h>
 
 #ifdef SMTSWITCH_INTERFACE
 #include <smt-switch/smt.h>
@@ -762,6 +763,11 @@ void ImportChildSynthAbstraction(const std::string& file_name, Ila& parent,
 
 void ExportSysCSim(const Ila& ila, const std::string& dir_path, bool opt) {
   auto ilator = Ilator(ila.get());
+  ilator.Generate(dir_path, opt);
+}
+
+void ExportAladdinSim(const Ila& ila, const std::string& dir_path, bool opt) {
+  auto ilator = Aladdin_Ilator(ila.get());
   ilator.Generate(dir_path, opt);
 }
 
