@@ -4,9 +4,10 @@
 #include <ilang/target-aladdin/aladdin_ilator.h>
 
 #include <fstream>
-#include <math.h>
+// #include <math.h>
 
 #include <fmt/format.h>
+#include <numeric>
 #include <z3++.h>
 
 #include <ilang/config.h>
@@ -71,28 +72,8 @@ static bool HasLoadFromStore(const ExprPtr& expr) {
 
 Aladdin_Ilator::Aladdin_Ilator(const InstrLvlAbsPtr& m) : m_(m) {
 
-  // GET ALL OF THE MEM VARIABLES TYPES (CACHE/DMA/SCRATCHPAD)
-  size_t numStates = m_->state_num();
-  for (size_t i = 0; i < numStates; i++)
-  {
-    auto s = m_->state(i);
-    if (s->sort()->is_mem())
-    {
-      memory_types.insert({s->name().str(), spad});
-    }
-  }
-  
-  // size_t numStates = m_->state_num();
-
-  // for (size_t i = 0; i < numStates; i++)
-  // {
-  //   auto s = m_->state(i);
-  //   if (s->sort()->is_mem())
-  //   {
-  //     std::cout << s->name();
-  //   }
-  // }
-  
+  input_memory_type = end_mem_type;
+   
 }
 
 Aladdin_Ilator::~Aladdin_Ilator() { Reset(); }
@@ -104,7 +85,10 @@ void Aladdin_Ilator::Generate(const std::string& dst, bool opt) {
   }
 
   auto status = true;
-  ILA_INFO << "Start generating SystemC simulator of " << m_;
+  ILA_INFO << "Start generating Aladdin simulator of " << m_;
+
+  // Get information from the user
+  GetInformationFromUser(os_portable_append_dir(dst, kDirSrc));
 
   // non-instruction basics
   status &= GenerateIlaBasics(os_portable_append_dir(dst, kDirSrc));
@@ -115,7 +99,7 @@ void Aladdin_Ilator::Generate(const std::string& dst, bool opt) {
   }
 
   // memory updates
-  status &= GenerateMemoryUpdate(os_portable_append_dir(dst, kDirSrc));
+  // status &= GenerateMemoryUpdate(os_portable_append_dir(dst, kDirSrc));
 
   // constant memory
   status &= GenerateConstantMemory(os_portable_append_dir(dst, kDirSrc));
@@ -143,7 +127,7 @@ void Aladdin_Ilator::Generate(const std::string& dst, bool opt) {
 
   // clean up if something went wrong
   if (status) {
-    ILA_INFO << "Sucessfully generate SystemC simulator at " << dst;
+    ILA_INFO << "Sucessfully generate Aladdin simulator at " << dst;
   } else {
     ILA_ERROR << "Fail generating simulator at " << dst;
 #ifdef NDEBUG
@@ -203,6 +187,162 @@ bool Aladdin_Ilator::Bootstrap(const std::string& root, bool opt) {
   return status;
 }
 
+Aladdin_Ilator::MemoryType Aladdin_Ilator::GetMemoryTypeInput() {
+  std::string nextLine;
+  std::cin >> nextLine;
+  //std::cin.clear();
+  //std::cin.ignore(std::numeric_limits<std::streamsize>::max());
+    
+  std::transform(nextLine.begin(), nextLine.end(), nextLine.begin(),
+  [](unsigned char c){ return std::tolower(c); });
+    
+  if (nextLine.find("dma") != std::string::npos)
+  {
+    return dma;
+  }
+  if (nextLine.find("acp") != std::string::npos)
+  {
+    return acp;
+  }
+  if (nextLine.find("cache") != std::string::npos)
+  {
+    return cache;
+  }
+  if (nextLine.find("spad") != std::string::npos)
+  {
+    return spad;
+  }
+  return end_mem_type;
+}
+
+std::string Aladdin_Ilator::MemoryTypeToString(MemoryType inp)
+{
+  switch (inp)
+  {
+  case spad:
+    return "spad";
+  case dma:
+    return "dma";
+  case acp:
+    return "acp";
+  case cache:
+    return "cache";
+  default:
+    return "end_mem_type";
+  }
+}
+
+Aladdin_Ilator::MemoryType Aladdin_Ilator::StringToMemoryType(std::string inp)
+{
+  std::transform(inp.begin(), inp.end(), inp.begin(),
+  [](unsigned char c){ return std::tolower(c); });
+  if (inp.find("spad") != std::string::npos)
+  {
+    return spad;
+  }
+  if (inp.find("dma") != std::string::npos)
+  {
+    return dma;
+  }
+  if (inp.find("acp") != std::string::npos)
+  {
+    return acp;
+  }
+  if (inp.find("cache") != std::string::npos)
+  {
+    return cache;
+  }
+  return end_mem_type;
+}
+
+bool Aladdin_Ilator::GetInformationFromUser(const std::string& dir) {
+  
+  StrBuff buff;
+
+  std::string nextLine;
+  if (os_portable_exist(os_portable_append_dir(dir, "input_info")))
+  {
+    std::cout << "Reuse existing choices?(y / n)\n";
+    char reuse = 0;
+    std::cin >> reuse;
+    
+    if (reuse == 'y' || reuse == 'Y')
+    {
+      std::ifstream input_file(os_portable_append_dir(dir, "input_info"));
+      std::string file_string = "";
+      std::ostringstream ss;
+      ss << input_file.rdbuf();
+      file_string = ss.str();
+
+      int pos = file_string.find("InputMemType[");
+      if (pos != std::string::npos)
+      {
+        std::string asStr = file_string.substr(pos, file_string.find(']', pos));
+        input_memory_type = StringToMemoryType(asStr);
+        fmt::format_to(buff, "InputMemType[{}]\n", MemoryTypeToString(input_memory_type));
+      }
+      
+      for (int i = 0; i < m_->state_num(); i++)
+      { 
+        ExprPtr var = m_->state(i);
+        if (var->is_mem())
+        {
+
+          int pos = file_string.find(var->name().str() + "MemType[");
+          if (pos != std::string::npos)
+          {
+            std::string asStr = file_string.substr(pos, file_string.find(']', pos));
+            memory_types.insert({var, StringToMemoryType(asStr)});
+            fmt::format_to(buff, "{}MemType[{}]\n", var->name().str(), MemoryTypeToString(memory_types.at(var)));
+          }
+        }
+      }
+
+    }
+  }
+
+  if (input_memory_type == end_mem_type)
+  {
+    std::cout << "What memory type should be used for the inputs?"
+                 " (dma / acp / cache / spad)\n";
+
+    input_memory_type = GetMemoryTypeInput();
+    if (input_memory_type == end_mem_type)
+    {
+      std::cerr << "Invalid memory type given for inputs\n";
+      exit(-1);
+    }
+    fmt::format_to(buff, "InputMemType[{}]\n", MemoryTypeToString(input_memory_type));
+  }
+  for (int i = 0; i < m_->state_num(); i++)
+  { 
+    ExprPtr var = m_->state(i);
+    {
+      if (var->is_mem())
+      {
+        if(memory_types.find(var) == memory_types.end() || memory_types.at(var) == end_mem_type) 
+        {
+          std::cout << "What memory type should be used for state \"" << var->name().str() 
+                    << "\" (dma / acp / cache / spad)\n";
+          memory_types.insert({var, GetMemoryTypeInput()});
+        
+          if (memory_types.find(var) != memory_types.end() && memory_types.at(var) == end_mem_type)
+          {
+            std::cerr << "Invalid memory type given for state \"" << var->name().str() << "\"\n";
+            exit(-1);
+          }
+          fmt::format_to(buff, "{}MemType[{}]\n", var->name().str(), MemoryTypeToString(memory_types.at(var)));
+
+        }
+      }
+    }
+  }
+
+  CommitSource("input_info", dir, buff);
+
+  return true;
+}
+
 bool Aladdin_Ilator::GenerateIlaBasics(const std::string& dir) {
   StrBuff buff;
 
@@ -217,21 +357,101 @@ bool Aladdin_Ilator::GenerateIlaBasics(const std::string& dir) {
       valid_expr = asthub::BoolConst(true);
       ILA_WARN << "Use default (true) valid for " << m;
     }
-    auto valid_func = RegisterFunction(GetValidFuncName(m), valid_expr);
-    BeginFuncDef(valid_func, buff);
+    auto valid_func = RegisterMacro(GetValidFuncName(m), valid_expr);
+    BeginMacroDef(valid_func, buff);
     ExprVarMap lut;
     ILA_CHECK(RenderExpr(valid_expr, buff, lut));
-    fmt::format_to(buff, "{var} = {local_name};\n",
+    fmt::format_to(buff, "{var} = {local_name};\\\n",
                    fmt::arg("var", GetCNameWithType(valid_expr)),
                    fmt::arg("local_name", LookUp(valid_expr, lut)));
-    EndFuncDef(valid_func, buff);
+    EndMacroDef(valid_func, buff);
   };
 
   // traverse the hierarchy
   m_->DepthFirstVisit(PerIla);
 
   // record and write to file
-  CommitSource("all_valid_funcs_in_hier.c", dir, buff);
+  CommitSource("all_valid_funcs_in_hier.h", dir, buff);
+  return true;
+}
+
+bool Aladdin_Ilator::MemHelper(StrBuff& b, ExprVarMap& l, ExprPtr& old, ExprPtr& next) {
+
+  // helper for traversing memory updates
+  class MemUpdateVisiter {
+  public:
+    MemUpdateVisiter(Aladdin_Ilator* h, StrBuff& b, ExprVarMap& l, ExprPtr& r, bool d)
+        : host(h), buff(b), lut_ref(l), root(r), isDma(d) {}
+
+    bool pre(const ExprPtr& expr) {
+      // stop traversing when reaching memory ITE (stand-alone func)
+      if (expr->is_mem() && expr->is_op() &&
+          asthub::GetUidExprOp(expr) == AstUidExprOp::kIfThenElse) {
+
+        auto pos = lut_ref.find(expr->arg(0));
+        ILA_ASSERT(pos != lut_ref.end());
+        std::string cond = pos->second;
+
+        fmt::format_to(buff, "if ({}){{\\\n",cond);
+        expr->arg(1)->DepthFirstVisitPrePost(*this);
+        fmt::format_to(buff, "}} else {{\\\n");
+        expr->arg(2)->DepthFirstVisitPrePost(*this);
+        fmt::format_to(buff, "}}\\\n");
+        // host->DfsExpr(expr, buff_ref, lut_ref);
+        return true;
+      } else {
+        return false;
+      }
+    }
+
+    void post(const ExprPtr& expr) { 
+      if (expr->is_mem() && expr->is_op() && 
+        asthub::GetUidExprOp(expr) == AstUidExprOp::kStore) 
+      {
+        if (isDma)
+        {
+          auto pos = lut_ref.find(expr);
+          ILA_ASSERT(pos != lut_ref.end());
+          uint64_t wordSize = GetWordSize(root);
+          std::string local_var = pos->second;
+          fmt::format_to(buff, 
+                  "dma_var =  {local_var}_data;\\\n"
+                  "dmaStore({mem_name} + {local_var}_addr, &dma_var, {word_size});\\\n",
+                  fmt::arg("mem_name", GetCName(root)),
+                  fmt::arg("local_var", local_var),
+                  fmt::arg("word_size", wordSize));
+        }
+        else
+        {
+          auto pos = lut_ref.find(expr);
+          ILA_ASSERT(pos != lut_ref.end());
+          std::string local_var = pos->second;
+          fmt::format_to(buff, "{mem_name}[{local_var}_addr] = {local_var}_data;\\\n",
+                  fmt::arg("mem_name", GetCName(root)),
+                  fmt::arg("local_var", local_var));
+        }
+        
+      }
+    }
+
+    Aladdin_Ilator* host;
+    StrBuff& buff;
+    ExprVarMap lut_ref;
+    ExprPtr& root;
+    bool isDma;
+  };
+
+  auto RenderMemUpdate = [this](const ExprPtr& e, StrBuff& b, ExprVarMap& l, ExprPtr& r) {
+    
+    bool d = memory_types.find(r) != memory_types.end() && memory_types.at(r) == dma;
+
+
+    auto mem_visiter = MemUpdateVisiter(this, b, l, r, d);
+    e->DepthFirstVisitPrePost(mem_visiter);
+  };
+  
+  RenderMemUpdate(next, b, l, old);
+
   return true;
 }
 
@@ -240,25 +460,22 @@ bool Aladdin_Ilator::GenerateInstrContent(const InstrPtr& instr,
   StrBuff buff;
   ExprVarMap lut;
 
-  // include headers
-  fmt::format_to(buff, "#include \"{}.h\"\n", GetProjectName());
-
   // decode function
   auto decode_expr = instr->decode();
-  auto decode_func = RegisterFunction(GetDecodeFuncName(instr), decode_expr);
-  BeginFuncDef(decode_func, buff);
+  auto decode_func = RegisterMacro(GetDecodeFuncName(instr), decode_expr);
+  BeginMacroDef(decode_func, buff);
   lut.clear();
   if (!RenderExpr(decode_expr, buff, lut)) {
     return false;
   }
-  fmt::format_to(buff, "{var} = {local_name};\n",
+  fmt::format_to(buff, "{var} = {local_name};\\\n",
                  fmt::arg("var", GetCNameWithType(decode_expr)),
                  fmt::arg("local_name", LookUp(decode_expr, lut)));
-  EndFuncDef(decode_func, buff);
+  EndMacroDef(decode_func, buff);
 
   // next state
-  auto update_func = RegisterFunction(GetUpdateFuncName(instr));
-  BeginFuncDef(update_func, buff);
+  auto update_func = RegisterMacro(GetUpdateFuncName(instr));
+  BeginMacroDef(update_func, buff);
   lut.clear();
   std::set<ExprPtr> visited;
   auto updated_states = instr->updated_states();
@@ -275,7 +492,7 @@ bool Aladdin_Ilator::GenerateInstrContent(const InstrPtr& instr,
       if (!RenderExpr(update_expr, buff, lut)) {
         return false;
       }
-      fmt::format_to(buff, "{type_name} {local_var}_nxt_holder = {local_var};\n",
+      fmt::format_to(buff, "{type_name} {local_var}_nxt_holder = {local_var};\\\n",
                      fmt::arg("type_name", GetCType(update_expr)),
                      fmt::arg("local_var", LookUp(update_expr, lut)));
     } else { // memory (one copy for performance, require special handling)
@@ -286,12 +503,6 @@ bool Aladdin_Ilator::GenerateInstrContent(const InstrPtr& instr,
       if (!RenderExpr(update_expr, buff, lut)) {
         return false;
       }
-      fmt::format_to(buff,
-                     "_BitInt({mem_addr_width}) {local_var}_addr_nxt_holder = {local_var}_addr;\n"
-                     "_BitInt({mem_data_width}) {local_var}_data_nxt_holder = {local_var}_data;\n",
-                     fmt::arg("mem_addr_width", update_expr->sort()->addr_width()),
-                     fmt::arg("mem_data_width", update_expr->sort()->data_width()),
-                     fmt::arg("local_var",  LookUp(update_expr, lut)));
     }
   }
   // update state
@@ -299,15 +510,44 @@ bool Aladdin_Ilator::GenerateInstrContent(const InstrPtr& instr,
     auto curr = instr->host()->state(s);
     auto next = instr->update(s);
     if (!curr->is_mem()) {
-      fmt::format_to(buff, "{current} = {next_value}_nxt_holder;\n",
+      fmt::format_to(buff, "{current} = {next_value}_nxt_holder;\\\n",
                      fmt::arg("current", GetCName(curr)),
                      fmt::arg("next_value", LookUp(next, lut)));
     } else {
+
+      MemHelper(buff, lut, curr, next);
+      continue;
+
+
       // UPDATE ANY CHANGED VALUES
-      fmt::format_to(buff,
-                     "{current}[{next_value}_addr_nxt_holder] = {next_value}_data_nxt_holder;\n",
+      if (memory_types.find(curr) != memory_types.end() && memory_types.at(curr) != dma) {
+        fmt::format_to(buff,
+                     "{current}[{next_value}_addr_nxt_holder] = {next_value}_data_nxt_holder;\\\n",
                      fmt::arg("current", GetCName(curr)),
                      fmt::arg("next_value", LookUp(next, lut)));
+      }
+      else {
+        uint64_t wordSize = GetWordSize(curr);
+        fmt::format_to(buff,
+                     "dma_var = {next_value}_data_nxt_holder;\\\n"
+                     "dmaStore({current} + {next_value}_addr_nxt_holder, &dma_var, {word_size});\\\n",
+                     fmt::arg("current", GetCName(curr)),
+                     fmt::arg("word_size", wordSize),
+                     fmt::arg("next_value", LookUp(next, lut)));
+        if (wordSize > biggestDMA)
+        {
+          biggestDMA = wordSize;
+        }
+        if (dmaGCD == (size_t)-1)
+        {
+          dmaGCD = wordSize;
+        }
+        else
+        {
+          dmaGCD = std::gcd(dmaGCD, wordSize);
+        }        
+        
+      }      
     }
   }
 
@@ -333,41 +573,58 @@ bool Aladdin_Ilator::GenerateInstrContent(const InstrPtr& instr,
   // fmt::format_to(buff, "instr_update_log << std::endl;\n");
   // fmt::format_to(buff, "#endif\n");
 
-  EndFuncDef(update_func, buff);
+  EndMacroDef(update_func, buff);
 
   // record and write to file
-  CommitSource(fmt::format("idu_{}.c", instr->name().str()), dir, buff);
+  CommitSource(fmt::format("idu_{}.h", instr->name().str()), dir, buff);
   return true;
 }
-
+/*
 bool Aladdin_Ilator::GenerateMemoryUpdate(const std::string& dir) {
 
   // helper for traversing memory updates
   class MemUpdateVisiter {
   public:
-    MemUpdateVisiter(Aladdin_Ilator* h, StrBuff& b, ExprVarMap& l)
-        : host(h), buff_ref(b), lut_ref(l) {}
+    MemUpdateVisiter(Aladdin_Ilator* h, StrBuff& b, ExprVarMap& l, ExprPtr& r)
+        : host(h), buff(b), lut_ref(l), root(r) {}
 
     bool pre(const ExprPtr& expr) {
       // stop traversing when reaching memory ITE (stand-alone func)
       if (expr->is_mem() && expr->is_op() &&
           asthub::GetUidExprOp(expr) == AstUidExprOp::kIfThenElse) {
-        host->DfsExpr(expr, buff_ref, lut_ref);
+        fmt::format_to(buff, "if ({}){\n", expr->arg(0));
+        expr->arg(1)->DepthFirstVisitPrePost(*this);
+        fmt::format_to(buff, "} else {\n");
+        expr->arg(2)->DepthFirstVisitPrePost(*this);
+        fmt::format_to(buff, "}\n");
+        // host->DfsExpr(expr, buff_ref, lut_ref);
         return true;
       } else {
         return false;
       }
     }
 
-    void post(const ExprPtr& expr) { host->DfsExpr(expr, buff_ref, lut_ref); }
+    void post(const ExprPtr& expr) { 
+      if (expr->is_mem() && expr->is_op() && 
+        asthub::GetUidExprOp(expr) == AstUidExprOp::kStore) 
+      {
+        auto pos = lut_ref.find(expr);
+        ILA_ASSERT(pos != lut_ref.end());
+        std::string local_var = pos->second;
+        fmt::format_to(buff, "{mem_name}[{local_var}_addr] = {local_var}_data;\n",
+                 fmt::arg("mem_name", GetCName(root)),
+                 fmt::arg("local_var", local_var));
+      }
+    }
 
     Aladdin_Ilator* host;
-    StrBuff& buff_ref;
+    StrBuff& buff;
     ExprVarMap lut_ref;
+    ExprPtr& root;
   };
 
-  auto RenderMemUpdate = [this](const ExprPtr& e, StrBuff& b, ExprVarMap& l) {
-    auto mem_visiter = MemUpdateVisiter(this, b, l);
+  auto RenderMemUpdate = [this](const ExprPtr& e, StrBuff& b, ExprVarMap& l, ExprPtr& r) {
+    auto mem_visiter = MemUpdateVisiter(this, b, l, r);
     e->DepthFirstVisitPrePost(mem_visiter);
   };
 
@@ -394,7 +651,7 @@ bool Aladdin_Ilator::GenerateMemoryUpdate(const std::string& dir) {
 
     lut.clear();
 
-    BeginFuncDef(mem_update_func, buff);
+    BeginMacroDef(mem_update_func, buff);
 
     if (asthub::GetUidExprOp(mem) == AstUidExprOp::kStore) {
       RenderMemUpdate(mem, buff, lut);
@@ -410,7 +667,7 @@ bool Aladdin_Ilator::GenerateMemoryUpdate(const std::string& dir) {
       fmt::format_to(buff, "}}\n");
     }
 
-    EndFuncDef(mem_update_func, buff);
+    EndMacroDef(mem_update_func, buff);
 
     if (buff.size() > 50000) {
       CommitSource(GetMemUpdateFile(), dir, buff);
@@ -420,7 +677,7 @@ bool Aladdin_Ilator::GenerateMemoryUpdate(const std::string& dir) {
 
   CommitSource(GetMemUpdateFile(), dir, buff);
   return true;
-}
+}*/
 
 bool Aladdin_Ilator::GenerateConstantMemory(const std::string& dir) {
   StrBuff buff;
@@ -491,17 +748,17 @@ bool Aladdin_Ilator::GenerateInitialSetup(const std::string& dir) {
   }
 
   // gen file
-  auto init_func = RegisterFunction("setup_initial_condition");
+  auto init_func = RegisterMacro("setup_initial_condition");
   StrBuff buff;
-  fmt::format_to(buff, "#include \"{}.h\"\n", GetProjectName());
-  BeginFuncDef(init_func, buff);
+
+  BeginMacroDef(init_func, buff);
   for (auto pair : init_values) {
-    fmt::format_to(buff, "{var_name} = {var_value};\n",
+    fmt::format_to(buff, "{var_name} = {var_value};\\\n",
                    fmt::arg("var_name", GetCName(pair.first)),
                    fmt::arg("var_value", pair.second));
   }
-  EndFuncDef(init_func, buff);
-  CommitSource("setup_initial_condition.c", dir, buff);
+  EndMacroDef(init_func, buff);
+  CommitSource("setup_initial_condition.h", dir, buff);
   return true;
 }
 
@@ -509,31 +766,150 @@ bool Aladdin_Ilator::GenerateExecuteKernel(const std::string& dir) {
   StrBuff buff;
 
   fmt::format_to(buff, "#include \"{}.h\"\n", GetProjectName());
+  fmt::format_to(buff, "#include \"all_valid_funcs_in_hier.h\"\n");
   fmt::format_to(buff, "#include \"gem5/dma_interface.h\"\n");
+
+  // auto kernel_func = RegisterFunction("compute");
+  // BeginFuncDef(kernel_func, buff);
+
+  fmt::format_to(computeDecl, "\nvoid compute(\n");
+
+
+  bool first = true;
+
+  // states
+  for (auto& var : absknob::GetSttTree(m_)) {
+    if (var->is_mem())
+    {
+      if (!first)
+      {
+        fmt::format_to(computeDecl, ",\n");
+      }
+      else
+      {
+        first = false;
+      }
+      if (var->sort()->data_width() > 1)
+      {
+        fmt::format_to(computeDecl, "  _BitInt({data_width}) * {name}",
+                       fmt::arg("data_width", var->sort()->data_width()),
+                       fmt::arg("name", GetCName(var)));
+      }
+      else
+      {
+        fmt::format_to(computeDecl, "  bool * {name}",
+                       fmt::arg("name", GetCName(var)));
+      }
+      
+      
+
+    }
+  }
+  //inputs
+  for (size_t i = 0; i < m_->input_num(); i++) {
+    if (!first)
+    {
+      fmt::format_to(computeDecl, ",\n");
+    }
+    else
+    {
+      first = false;
+    }
+    fmt::format_to(computeDecl, "  {type} * {name}_inps_vals",
+                 fmt::arg("type", GetCType(m_->input(i))),
+                 fmt::arg("name", GetCName(m_->input(i))));
+  }
+
+
+  fmt::format_to(computeDecl, "\n)");
+
+  fmt::format_to(buff, "{}", to_string(computeDecl));
+
+  fmt::format_to(buff,  "{{\n");
+
+  // states
+  if (absknob::GetSttTree(m_).size())
+  {
+    fmt::format_to(buff, "\n  // states\n");
+  }
+  for (auto& var : absknob::GetSttTree(m_)) {
+    if (!var->is_mem())
+    {
+      fmt::format_to(buff, "  {var} = 0;\n",
+                       fmt::arg("var", GetCNameWithType(var)));
+    }
+  }
+
+  // inputs
+  if (m_->input_num())
+  {
+    fmt::format_to(buff, "\n  // inputs\n");
+  }
+  for (size_t i = 0; i < m_->input_num(); i++) {
+    fmt::format_to(buff, "  {var};\n",
+                 fmt::arg("var", GetCNameWithType(m_->input(i))));
+  
+    size_t wordSize = GetWordSize(m_->input(i));
+    if (wordSize > biggestDMA)
+    {
+      biggestDMA = wordSize;
+    }
+    if (dmaGCD == (size_t)-1)
+    {
+      dmaGCD = wordSize;
+    }
+    else
+    {
+      dmaGCD = std::gcd(dmaGCD, wordSize);
+    }     
+
+  }
+
+  if (biggestDMA > 1)
+  {
+    fmt::format_to(buff, "\n  _BitInt({}) dma_var;\n", biggestDMA * 8);
+  }
+  else
+  {
+    fmt::format_to(buff, "\n  bool dma_var;\n");
+
+  }
   
 
 
-
-  auto kernel_func = RegisterFunction("compute");
-  BeginFuncDef(kernel_func, buff);
-
   // setup initial condition
-  fmt::format_to(buff, 
+  fmt::format_to(buff, "\n  const int cycles_to_simulate = CYCLES_TO_SIMULATE;\n"
                        "  int instr_cntr = 0;\n"
+                       "  bool valid = false;\n"
+                       "  bool decode = false;\n"
                        "  setup_initial_condition();\n\n"
                        "  main_while: while (instr_cntr < cycles_to_simulate) {{\n\n");
 
   // read in input value
   for (size_t i = 0; i < m_->input_num(); i++) {
-    fmt::format_to(buff, "    dmaLoad(&{input_name}, {input_name}_inps + instr_cntr, sizeof({input_name}));\n",
+    if (input_memory_type != dma)
+    {
+      fmt::format_to(buff, "    {input_name} = {input_name}_inps_vals[instr_cntr];\n",
                    fmt::arg("input_name", GetCName(m_->input(i))));
+    }
+    else
+    {
+      uint64_t wordSize = GetWordSize(m_->input(i));
+      fmt::format_to(buff, "    dmaLoad(&dma_var, {input_name}_inps_vals + instr_cntr, {word_size});\n"
+                     "    {input_name} = ({return_type})dma_var;\n",
+                   fmt::arg("input_name", GetCName(m_->input(i))),
+                   fmt::arg("return_type", GetCType(m_->input(i))),
+                   fmt::arg("word_size", wordSize));
+    }
   }
 
   // instruction execution
   auto ExecInstr = [this, &buff](const InstrPtr& instr, bool child) {
     fmt::format_to(
         buff,
-      "\n{ind}    if ({valid_func_name}() && {decode_func_name}()) {{\n"
+        "\n{ind}    {valid_func_name}(valid);\n"
+        "{ind}    {decode_func_name}(decode);\n"
+        "{ind}    if (valid && decode) {{\n"
         "{ind}      {update_func_name}();\n"
         "{ind}{child_counter}"
         "{ind}    }}\n\n",
@@ -549,7 +925,7 @@ bool Aladdin_Ilator::GenerateExecuteKernel(const std::string& dir) {
   auto all_instrs = absknob::GetInstrTree(m_);
 
   // top-level instr
-  for (auto& instr : top_instrs) {
+  for (auto& instr : top_instrs) {  
     ExecInstr(instr, false);
   }
 
@@ -570,7 +946,8 @@ bool Aladdin_Ilator::GenerateExecuteKernel(const std::string& dir) {
                        "  }}\n");
 
   // done
-  EndFuncDef(kernel_func, buff);
+  // EndFuncDef(kernel_func, buff);
+  fmt::format_to(buff, "}}");
 
   CommitSource("compute.c", dir, buff);
   return true;
@@ -585,6 +962,15 @@ bool Aladdin_Ilator::GenerateGlobalHeader(const std::string& dir) {
                  fmt::arg("project", GetProjectName()));
 
   fmt::format_to(buff, "\n#include <stdbool.h>\n");
+  fmt::format_to(buff, "#include \"gem5_harness.h\"\n");
+
+  for (auto& instr : absknob::GetInstrTree(m_)) {
+    fmt::format_to(buff, "#include \"idu_{}.h\"\n", instr->name().str());
+  }
+  fmt::format_to(buff, "#include \"setup_initial_condition.h\"\n");
+  fmt::format_to(buff, "#include \"input_vals.h\"\n");
+
+  fmt::format_to(buff, "{};", to_string(computeDecl));
 
   // function declarations
   fmt::format_to(buff, "\n// function declarations\n");
@@ -598,39 +984,72 @@ bool Aladdin_Ilator::GenerateGlobalHeader(const std::string& dir) {
     WriteFuncDecl(func.second, buff);
   }
 
-  // inputs
-  fmt::format_to(buff, "\n// inputs\n");
-  for (auto& var : absknob::GetInp(m_)) {
-    fmt::format_to(buff,
-                   "extern {type} {name};\n"
-                   "extern {type} * {name}_inps;\n",
-                   fmt::arg("type", GetCType(var)),
-                   fmt::arg("name", GetCName(var)));
-  }
+  // // inputs
+  // fmt::format_to(buff, "\n// inputs\n");
+  // for (auto& var : absknob::GetInp(m_)) {
+  //   fmt::format_to(buff,
+  //                  "extern {type} {name};\n"
+  //                  "extern {type} * {name}_inps;\n",
+  //                  fmt::arg("type", GetCType(var)),
+  //                  fmt::arg("name", GetCName(var)));
+  // }
 
-  // state and global vars
-  fmt::format_to(buff, "\n// states\n");
-  for (auto& var : absknob::GetSttTree(m_)) {
-    fmt::format_to(buff,
-                   "extern {var};\n",
-                   fmt::arg("var", GetCNameWithType(var)));
-  }
-  fmt::format_to(buff, "\n// global vars\n");
-  for (auto& var : global_vars_) {
-    fmt::format_to(buff,
-                   "extern {var};\n",
-                   fmt::arg("var", GetCNameWithType(var)));
-  }
-  fmt::format_to(buff,
-                 "extern const int cycles_to_simulate;\n");
+  // // state and global vars
+  // fmt::format_to(buff, "\n// states\n");
+  // for (auto& var : absknob::GetSttTree(m_)) {
+  //   fmt::format_to(buff,
+  //                  "extern {var};\n",
+  //                  fmt::arg("var", GetCNameWithType(var)));
+  //   if (var->is_mem())
+  //   {
+  //     if (memory_types.at(var) == dma)
+  //     {
+  //       fmt::format_to(buff, "extern _BitInt({width}) {var}_accl;\n",
+  //                      fmt::arg("var", GetCName(var)),
+  //                      fmt::arg("width", var->sort()->data_width()));
+  //     }
+      
+  //   }
+  // }
+
+  // global_vars_ is always empty
+
+  // fmt::format_to(buff, "\n// global vars\n");
+  // for (auto& var : global_vars_) {
+  //   fmt::format_to(buff,
+  //                  "extern {var};\n",
+  //                  fmt::arg("var", GetCNameWithType(var)));
+
+  //   if (var->is_mem())
+  //   {
+  //     if (memory_types.at(var) == dma)
+  //     {
+  //       fmt::format_to(buff, "extern _BitInt({width}) {var}_accl;\n",
+  //                      fmt::arg("var", GetCName(var)),
+  //                      fmt::arg("width", var->sort()->data_width()));
+  //     }    
+  //   }
+  // }
+
+  // fmt::format_to(buff,
+  //                "extern const int cycles_to_simulate;\n");
 
   // memory constant
-  fmt::format_to(buff, "\n// memory constants\n");
-  for (auto& mem : const_mems_) {
-    fmt::format_to(buff, 
-                  "extern static {var};\n",
-                   fmt::arg("var", GetCNameWithType(mem)));
-  }
+  // fmt::format_to(buff, "\n// memory constants\n");
+  // for (auto& mem : const_mems_) {
+  //   fmt::format_to(buff, 
+  //                 "extern {var};\n",
+  //                  fmt::arg("var", GetCNameWithType(mem)));
+
+    // if (memory_types.at(mem) == dma)
+    // {
+    //   fmt::format_to(buff, "_BitInt({width}) {var}_accl;\n",
+    //                    fmt::arg("var", GetCName(mem)),
+    //                    fmt::arg("width", mem->sort()->data_width()));
+    // }
+      
+
+  // }
 
   fmt::format_to(buff,
                  "\n#endif//_{project}_H_\n",
@@ -648,71 +1067,195 @@ bool Aladdin_Ilator::GenerateBuildSupport(const std::string& dir) {
   buff.clear();
 
   fmt::format_to(buff, "#include \"{}.h\"\n", GetProjectName());
+  fmt::format_to(buff, "#include \"aladdin_sys_connection.h\"\n");
+  fmt::format_to(buff, "#include \"aladdin_sys_constants.h\"\n");
+  fmt::format_to(buff, "#include <stdlib.h>\n");
+
+
+  StrBuff memoryAllocateBuff;
+  memoryAllocateBuff.clear();
 
   // input
   if (absknob::GetInp(m_).size())
   {
-    fmt::format_to(buff, "\n// inputs\n");
+    fmt::format_to(memoryAllocateBuff, "\n  // inputs\n");
   }
   for (auto& var : absknob::GetInp(m_)) {
-    fmt::format_to(buff,
-                   "{var};\n",
-                   fmt::arg("var", GetCNameWithType(var)));
+    fmt::format_to(memoryAllocateBuff,
+                   "  {c_name}_inps_vals[CYCLES_TO_SIMULATE] = {name}_INPS_VALS;\n",
+                   fmt::arg("var", var->name().str()),
+                   fmt::arg("c_name", GetCNameWithType(var)),
+                   fmt::arg("def1", var->is_bool() ? "false" : "0"),
+                   fmt::arg("def2", var->is_bool() ? "true" : "1"),
+                   fmt::arg("type", GetCType(var)),
+                   fmt::arg("name", GetCName(var)));
   }
 
   // state and global vars
   if (absknob::GetSttTree(m_).size())
   {
-    fmt::format_to(buff, "\n// states\n");
+    fmt::format_to(memoryAllocateBuff, "\n  // states\n");
   }
   for (auto& var : absknob::GetSttTree(m_)) {
-    fmt::format_to(buff, "{var};\n",
-                   fmt::arg("var", GetCNameWithType(var)));
+    // fmt::format_to(memoryAllocateBuff, "{var};\n",
+    //                fmt::arg("var", GetCNameWithType(var)));
+    if (var->is_mem())
+    {
+      if (var->sort()->data_width() > 1)
+      {
+        fmt::format_to(memoryAllocateBuff, "  _BitInt({width}) * {var} = (_BitInt({width})*) malloc({size});\n",
+                       fmt::arg("var", GetCName(var)),
+                       fmt::arg("width", var->sort()->data_width()),
+                       fmt::arg("size", GetNumBytes(var)));
+      }
+      else
+      {
+        fmt::format_to(memoryAllocateBuff, "  bool * {var} = (bool*) malloc({size});\n",
+                       fmt::arg("var", GetCName(var)),
+                       fmt::arg("size", GetNumBytes(var)));
+      }
+      
+
+
+      
+    }
+    
   }
 
-  if (global_vars_.size())
-  {  
-    fmt::format_to(buff, "\n// global vars\n"); 
-  }
-  for (auto& var : global_vars_) {
-    fmt::format_to(buff, "{var};\n",
-                   fmt::arg("var", GetCNameWithType(var)));
-  }
+  // global_vars_ is always empty
+
+  // if (global_vars_.size())
+  // {  
+  //   fmt::format_to(buff, "\n// global vars\n"); 
+  // }
+  // for (auto& var : global_vars_) {
+  //   fmt::format_to(buff, "{var};\n",
+  //                  fmt::arg("var", GetCNameWithType(var)));
+  // }
 
   // memory constant
   if (const_mems_.size())
   {
-    fmt::format_to(buff, "\n// memory constants\n");
+    fmt::format_to(memoryAllocateBuff, "\n  // memory constants\n");
   }
+
   for (auto& mem : const_mems_) {
-    fmt::format_to(buff, "static {var};\n",
-                   fmt::arg("var", GetCNameWithType(mem)));
+    auto const_mem = std::dynamic_pointer_cast<ExprConst>(mem);
+    const auto& val_map = const_mem->val_mem()->val_map();
+    std::vector<std::string> addr_data_pairs;
+
+
+    for (auto& it : val_map) {
+      addr_data_pairs.push_back(fmt::format("{mem_name}[{addr}] = {data};",
+                                              fmt::arg("mem_name", GetCName(mem)),
+                                              fmt::arg("addr", it.first),
+                                              fmt::arg("data", it.second)));
+    }
+    fmt::format_to(
+          memoryAllocateBuff,
+          "  {var};\n"
+          "  {addr_data_pairs}\n",
+          fmt::arg("var", GetCNameWithType(mem)),
+          fmt::arg("addr_data_pairs", fmt::join(addr_data_pairs, "\n  ")));
   }
+  
+
+
+  StrBuff computeArgsBuff;
+  bool first = true;
+  // states
+  for (auto& var : absknob::GetSttTree(m_)) {
+    if (var->is_mem())
+    {
+      if (!first)
+      {
+        fmt::format_to(computeArgsBuff, ",\n");
+      }
+      else
+      {
+        first = false;
+      }
+      
+      fmt::format_to(computeArgsBuff, "  {name}",
+                       fmt::arg("name", GetCName(var)));
+
+    }
+  }
+  //inputs
+  for (size_t i = 0; i < m_->input_num(); i++) {
+    if (!first)
+    {
+      fmt::format_to(computeArgsBuff, ",\n");
+    }
+    else
+    {
+      first = false;
+    }
+    fmt::format_to(computeArgsBuff, "  {name}_inps_vals",
+                 fmt::arg("name", GetCName(m_->input(i))));
+  }
+
+
 
   // main function
   static const char* kSimEntryTemplate =
       "\nint main(int argc, char* argv[]) {{\n"
-      "  compute();\n"
+      "{memory_allocate}\n"
+      "#ifdef LLVM_TRACE\n"
+      "  compute({compute_args});\n"
+      "#else\n"
+      "{array_mapping}"
+      "  invokeAcceleratorAndBlock(INTEGRATION_TEST);\n"
+      "#endif\n"
       "  return 0; \n"
-      "}}\n";
+      "}}\n"; 
 
-  fmt::format_to(buff, kSimEntryTemplate);
+
+  StrBuff mappingArrays;
+  for (auto s : memory_types)
+  {
+    if (s.second != MemoryType::spad)
+    {
+      uint64_t num_bytes =  GetNumBytes(s.first);
+      fmt::format_to(mappingArrays,
+                   "  mapArrayToAccelerator(\n"
+                   "    INTEGRATION_TEST, \"{var_name}\", {var_name}, {num_bytes});\n",
+                   fmt::arg("var_name", GetCName(s.first)),
+                   fmt::arg("num_bytes", num_bytes));
+    }
+  }
+  for (auto& s : absknob::GetInp(m_))
+  {
+    uint64_t word_size =  GetWordSize(s);
+    fmt::format_to(mappingArrays,
+                   "  mapArrayToAccelerator(\n"
+                   "    INTEGRATION_TEST, \"{var_name}_inps_vals\", {var_name}_inps_vals, {word_size} * CYCLES_TO_SIMULATE);\n",
+                   fmt::arg("var_name", GetCName(s)),
+                   fmt::arg("word_size", word_size));
+  }
+  
+  
+  fmt::format_to(buff, kSimEntryTemplate,
+    fmt::arg("array_mapping", to_string(mappingArrays)),
+    fmt::arg("memory_allocate", to_string(memoryAllocateBuff)),
+    fmt::arg("compute_args", to_string(computeArgsBuff)));
       
   WriteFile(os_portable_append_dir(dir, "main.c"), buff);
 
 
   buff.clear();
 
-  fmt::format_to(buff, 
+  fmt::format_to(buff,
                 "SRCS={src_text}\n\n"
                 "ACCEL_NAME = ila\n"
                 "TEST_BIN = $(ACCEL_NAME)\n"
+                "BMARK_SPECIFIC_CFLAGS=-DDMA_INTERFACE_V3\n"
                 "export TRACE_OUTPUT_DIR=$(ACCEL_NAME)\n"
                 "ifndef WORKLOAD\n"
                 "  export WORKLOAD=compute\n"
                 "endif\n"
-                "include ../common/Makefile.common\n"
-                "include ../common/Makefile.tracer\n",
+                "include ../../common/Makefile.tracer\n"
+                "include ../../common/Makefile.gem5\n",
                 fmt::arg("src_text", sourcesList));
 
   WriteFile(os_portable_append_dir(dir, "Makefile"), buff);
@@ -724,24 +1267,19 @@ bool Aladdin_Ilator::GenerateInputTemplate(const std::string& dir) {
 
   StrBuff buff;
 
-  fmt::format_to(buff, "#include \"{}.h\"\n\n", GetProjectName());
-
-
   fmt::format_to(buff, "// How many cycles would you like to simulate?\n"
-                       "#define CYCLES_TO_SIMULATE 5\n\n"
-                       "const int cycles_to_simulate = CYCLES_TO_SIMULATE;\n\n");
+                       "#define CYCLES_TO_SIMULATE 5\n\n");
 
   for (auto& var : absknob::GetInp(m_)) {
     fmt::format_to(buff,
                    "// Please enter values for the input \"{var}\"\n"
-                   "{c_name}_inps_vals[CYCLES_TO_SIMULATE] = {{\n"
-                   "  {def1},\n"
-                   "  {def2},\n"
-                   "  {def1},\n"
-                   "  {def2},\n"
-                   "  {def1},\n"
-                   "}};\n\n"
-                   "{type} * {name}_inps = &{name}_inps_vals[0];\n\n",
+                   "#define {name}_INPS_VALS {{\\\n"
+                   "  {def1},\\\n"
+                   "  {def2},\\\n"
+                   "  {def1},\\\n"
+                   "  {def2},\\\n"
+                   "  {def1},\\\n"
+                   "}}\n\n",
                    fmt::arg("var", var->name().str()),
                    fmt::arg("c_name", GetCNameWithType(var)),
                    fmt::arg("def1", var->is_bool() ? "false" : "0"),
@@ -751,7 +1289,7 @@ bool Aladdin_Ilator::GenerateInputTemplate(const std::string& dir) {
   }
 
   auto entry_path =
-      os_portable_append_dir(dir, "input_vals.c");
+      os_portable_append_dir(dir, "input_vals.h");
   
   WriteFile(entry_path, buff);
   return true;
@@ -761,15 +1299,25 @@ bool Aladdin_Ilator::GenerateInputTemplate(const std::string& dir) {
 void Aladdin_Ilator::AddConfigLineToBuff(const ilang::ExprPtr & var, StrBuff & buff) {
   if (!var->is_mem())
   {    
-    fmt::format_to(buff,
-                 "partition,complete,{var},{num_bytes},{word_size}\n",
-                 fmt::arg("var", GetCName(var)),
-                 fmt::arg("num_bytes", GetNumBytes(var)),
-                 fmt::arg("word_size", GetWordSize(var)));
+    // fmt::format_to(buff,
+    //              "partition,complete,{var},{num_bytes},{word_size}\n",
+    //              fmt::arg("var", GetCName(var)),
+    //              fmt::arg("num_bytes", GetNumBytes(var)),
+    //              fmt::arg("word_size", GetWordSize(var)));
   }
   else
   {
-    switch (memory_types.at(var->name().str())) {
+    if (memory_types.find(var) == memory_types.end())
+    {
+      fmt::format_to(buff,
+                 "partition,cyclic,{var},{word_size},{word_size},1\n",
+                 fmt::arg("var", GetCName(var)),
+                 fmt::arg("word_size", GetWordSize(var)));
+      return;
+    }
+    
+
+    switch (memory_types.at(var)) {
     case spad:
       fmt::format_to(buff,
                  "partition,cyclic,{var},{num_bytes},{word_size},1\n",
@@ -777,11 +1325,21 @@ void Aladdin_Ilator::AddConfigLineToBuff(const ilang::ExprPtr & var, StrBuff & b
                  fmt::arg("num_bytes", GetNumBytes(var)),
                  fmt::arg("word_size", GetWordSize(var)));
       break;
-    case dma:
-      break;
+    // case dma:
+      // fmt::format_to(buff,
+      //            "partition,cyclic,{var}_accl,{word_size},{word_size},1\n",
+      //            fmt::arg("var", GetCName(var)),
+      //            fmt::arg("word_size", GetWordSize(var)));
+      // break;
     case cache:
       fmt::format_to(buff,
                  "cache,{var},{word_size}\n",
+                 fmt::arg("var", GetCName(var)),
+                 fmt::arg("word_size", GetWordSize(var)));
+      break;
+    case acp:
+      fmt::format_to(buff,
+                 "acp,{var},{word_size}\n",
                  fmt::arg("var", GetCName(var)),
                  fmt::arg("word_size", GetWordSize(var)));
       break;
@@ -796,12 +1354,42 @@ bool Aladdin_Ilator::GenerateConfigTemplate(const std::string& dir) {
   // inputs
   // fmt::format_to(buff, "\n// inputs\n");
   for (auto& var : absknob::GetInp(m_)) {
-    AddConfigLineToBuff(var, buff);
-    fmt::format_to(buff,
-                 "partition,complete,{var}_inps,8,8\n",
+    switch (input_memory_type)
+    {
+    case cache:
+      // AddConfigLineToBuff(var, buff);
+      fmt::format_to(buff,
+                 "cache,{var}_inps_vals,{word_size}\n",
                  fmt::arg("var", GetCName(var)),
                  fmt::arg("num_bytes", GetNumBytes(var)),
                  fmt::arg("word_size", GetWordSize(var)));
+      break;
+    case acp:
+      // AddConfigLineToBuff(var, buff);
+      fmt::format_to(buff,
+                 "acp,{var}_inps_vals,{word_size}\n",
+                 fmt::arg("var", GetCName(var)),
+                 fmt::arg("num_bytes", GetNumBytes(var)),
+                 fmt::arg("word_size", GetWordSize(var)));
+      break;
+    case spad:
+      fmt::format_to(buff,
+                 "partition,cyclic,{var}_inps_vals,{num_bytes},{word_size},1\n",
+                 fmt::arg("var", GetCName(var)),
+                 fmt::arg("num_bytes", GetWordSize(var) * 5),
+                 fmt::arg("word_size", GetWordSize(var)));
+      break;
+    case dma:
+      fmt::format_to(buff,
+                 "partition,complete,{var},{word_size},{word_size}\n",
+                 fmt::arg("var", GetCName(var)),
+                 fmt::arg("num_bytes", GetNumBytes(var)),
+                 fmt::arg("word_size", GetWordSize(var)));
+      break;
+    default:
+      break;
+    }
+    
   }
 
   // state and global vars
@@ -810,11 +1398,11 @@ bool Aladdin_Ilator::GenerateConfigTemplate(const std::string& dir) {
     AddConfigLineToBuff(var, buff);
   }
   // fmt::format_to(buff, "\n// global vars\n");
-  for (auto& var : global_vars_) {
-    AddConfigLineToBuff(var, buff);
-  }
-  fmt::format_to(buff,
-                 "partition,complete,cycles_to_simulate,4,4\n");
+  // for (auto& var : global_vars_) {
+  //   AddConfigLineToBuff(var, buff);
+  // }
+  // fmt::format_to(buff,
+  //                "partition,complete,cycles_to_simulate,4,4\n");
 
   // memory constant
   // fmt::format_to(buff, "\n// memory constants\n");
@@ -822,6 +1410,7 @@ bool Aladdin_Ilator::GenerateConfigTemplate(const std::string& dir) {
     AddConfigLineToBuff(mem, buff);
   }
 
+  fmt::format_to(buff, "partition,cyclic,dma_var,{},{},1\n", biggestDMA, dmaGCD);
 
   fmt::format_to(buff,
                   "cycle_time,6\n"
@@ -867,6 +1456,14 @@ Aladdin_Ilator::CFunc* Aladdin_Ilator::RegisterFunction(const std::string& func_
   return func;
 }
 
+Aladdin_Ilator::CFunc * Aladdin_Ilator::RegisterMacro(const std::string& macro_name,
+                                          ExprPtr return_expr) {
+  auto macro = new CFunc(macro_name, return_expr);
+  auto [it, status] = macros_.insert({macro->name, macro});
+  ILA_ASSERT(status);
+  return macro;
+}
+
 Aladdin_Ilator::CFunc* Aladdin_Ilator::RegisterExternalFunc(const FuncPtr& func) {
   auto func_cxx = new CFunc(func->name().str(), func->out());
   auto [it, status] = externs_.insert({func_cxx->name, func_cxx});
@@ -906,9 +1503,27 @@ void Aladdin_Ilator::BeginFuncDef(Aladdin_Ilator::CFunc* func, StrBuff& buff) co
                  fmt::arg("argument", args));
 }
 
+void Aladdin_Ilator::BeginMacroDef(Aladdin_Ilator::CFunc* func, StrBuff& buff) const {
+  ILA_ASSERT(func->args.empty()); // no definition for uninterpreted funcs
+
+  auto type = (func->ret) ? "output" : "";
+
+  fmt::format_to(buff, "#define {func_name}({args}) {{\\\n",
+                 fmt::arg("project", GetProjectName()),
+                 fmt::arg("func_name", func->name),
+                 fmt::arg("args", type));
+}
+
 void Aladdin_Ilator::EndFuncDef(Aladdin_Ilator::CFunc* func, StrBuff& buff) const {
   if (func->ret) {
     fmt::format_to(buff, "return {};\n", GetCName(func->ret));
+  }
+  fmt::format_to(buff, "}}\n");
+}
+
+void Aladdin_Ilator::EndMacroDef(Aladdin_Ilator::CFunc* func, StrBuff& buff) const {
+  if (func->ret) {
+    fmt::format_to(buff, "output = {};\\\n", GetCName(func->ret));
   }
   fmt::format_to(buff, "}}\n");
 }
@@ -975,14 +1590,31 @@ std::string Aladdin_Ilator::GetCType(const SortPtr& sort) {
   } else if (sort->is_bool()) {
     return "bool";
   } else if (sort->is_bv()) {
-    return fmt::format("_BitInt({})", sort->bit_width());
+    if (sort->bit_width() > 1) 
+    {
+      return fmt::format("_BitInt({})", sort->bit_width());
+    }
+    else
+    {
+      return "bool";
+    }
   } else {
     ILA_ASSERT(sort->is_mem());
     uint64_t num_elements = 1 << sort->addr_width();
-    return fmt::format(
+
+    if (sort->data_width() > 1)
+    {
+      return fmt::format(
         "_BitInt({data_width})[{num_elements}]",
         fmt::arg("num_elements", num_elements),
         fmt::arg("data_width", sort->data_width()));
+    }
+    else
+    {
+      return fmt::format(
+        "bool[{num_elements}]",
+        fmt::arg("num_elements", num_elements));
+    }
   }
 }
 
@@ -1010,15 +1642,33 @@ std::string Aladdin_Ilator::GetCNameWithType(const ExprPtr & expr) {
   } else if (sort->is_bool()) {
     return "bool " + name;
   } else if (sort->is_bv()) {
-    return fmt::format("_BitInt({}) {}", sort->bit_width(), name);
+    if (sort->bit_width() > 1)
+    {
+      return fmt::format("_BitInt({}) {}", sort->bit_width(), name);
+    }
+    else
+    {
+      return fmt::format("bool {}", name);
+    }
   } else {
     ILA_ASSERT(sort->is_mem());
     uint64_t num_elements = 1 << sort->addr_width();
-    return fmt::format(
-        "_BitInt({data_width}) {name}[{num_elements}]",
-        fmt::arg("num_elements", num_elements),
-        fmt::arg("name", name),
-        fmt::arg("data_width", sort->data_width()));
+
+    if (sort->data_width() > 1)
+    {
+      return fmt::format(
+          "_BitInt({data_width}) {name}[{num_elements}]",
+          fmt::arg("num_elements", num_elements),
+          fmt::arg("name", name),
+          fmt::arg("data_width", sort->data_width()));
+    }
+    else
+    {
+      return fmt::format(
+          "bool {name}[{num_elements}]",
+          fmt::arg("num_elements", num_elements),
+          fmt::arg("name", name));
+    }
   }
 }
 
@@ -1045,8 +1695,10 @@ uint64_t Aladdin_Ilator::GetNumBytes(const ExprPtr & expr) {
     return GetWordSize(expr);
   }
 
+  std::cout <<  ((uint64_t)1 << ((uint64_t)sort->addr_width())) << '\n';
+
   // Frankly if it is expecting to use more than 2^64 bytes it will have other problems
-  return ((1 << sort->addr_width()) * GetWordSize(expr));
+  return (((uint64_t)1 << ((uint64_t)sort->addr_width())) * GetWordSize(expr));
 }
 
 std::string Aladdin_Ilator::GetValidFuncName(const InstrLvlAbsCnstPtr& m) {

@@ -4,7 +4,7 @@
 #ifndef ILANG_TARGET_SC_Aladdin_Ilator_H__
 #define ILANG_TARGET_SC_Aladdin_Ilator_H__
 
-#include <memory>
+// #include <memory>
 #include <string>
 
 #include <fmt/format.h>
@@ -38,7 +38,7 @@ private:
   /// Internal type of Expr to var name look-up table.
   typedef std::unordered_map<ExprPtr, std::string, ExprHash> ExprVarMap;
   /// Internal type of the memory
-  typedef enum _MemoryType { spad, reg, dma, acp, cache } MemoryType;
+  typedef enum _MemoryType { spad, reg, dma, acp, cache, end_mem_type } MemoryType;
   /// Internal type to manage functions.
   class CxxFunc {
   public:
@@ -74,12 +74,16 @@ private:
 
   /// Generated functions (with definition).
   std::map<std::string, CFunc*> functions_;
+  /// Generate macros
+  std::map<std::string, CFunc*> macros_;
   /// Generated functions (without definition).
   std::map<std::string, CFunc*> externs_;
   /// Wrapper functions to update memory values.
   std::map<std::string, CFunc*> memory_updates_;
   // Contains the types for each of the memory states
-  std::map<std::string, MemoryType> memory_types;
+  std::map<ExprPtr, MemoryType> memory_types;
+  // Decides whether the inputs should be dma, cache, acp, or spad
+  MemoryType input_memory_type;
 
   /// Generated sources files.
   std::set<std::string> source_files_;
@@ -87,6 +91,11 @@ private:
   std::set<ExprPtr> const_mems_;
   /// Global variables other than state variables.
   std::set<ExprPtr> global_vars_;
+
+  StrBuff computeDecl;
+
+  size_t biggestDMA = 0;
+  size_t dmaGCD = -1;
 
   // ------------------------- HELPERS -------------------------------------- //
   /// Reset all internal trackers.
@@ -96,6 +105,8 @@ private:
   /// Generation bootstrap, e.g., creating directories.
   bool Bootstrap(const std::string& root, bool opt);
 
+  /// Gets required info from the user
+  bool GetInformationFromUser(const std::string& dir);
   /// Interpret non-instr basics, e.g., valid.
   bool GenerateIlaBasics(const std::string& dir);
   /// Interpret instruction semantics (decode and state updates).
@@ -139,6 +150,10 @@ private:
   /// Request a function with the specified name and return var.
   CFunc* RegisterFunction(const std::string& func_name,
                             ExprPtr return_expr = nullptr);
+
+  /// Request a macro with the specified name and return var
+  CFunc* RegisterMacro(const std::string& macro_name,
+                            ExprPtr return_expr = nullptr);
   /// Request a function simulating the uninterpreted function.
   CFunc* RegisterExternalFunc(const FuncPtr& func);
   /// Request a wrapping function for memory operation.
@@ -146,8 +161,12 @@ private:
 
   /// Start function definition.
   void BeginFuncDef(CFunc* func, StrBuff& buff) const;
+  /// Start macro definition
+  void BeginMacroDef(CFunc* func, StrBuff& buff) const;
   /// Finish function definition.
   void EndFuncDef(CFunc* func, StrBuff& buff) const;
+  /// Finish macro definition
+  void EndMacroDef(Aladdin_Ilator::CFunc* func, StrBuff& buff) const;
   /// Write function declaration.
   void WriteFuncDecl(CFunc* func, StrBuff& buff) const;
   /// Record and write the source to file.
@@ -155,6 +174,14 @@ private:
                     const StrBuff& buff);
   /// Add config line for var to buff
   void AddConfigLineToBuff(const ilang::ExprPtr & var, StrBuff & buff);
+  /// Gets cin input for the memory type
+  MemoryType GetMemoryTypeInput();
+  /// Returns the string representation of inp
+  std::string MemoryTypeToString(MemoryType inp);
+  /// Returns the MemoryType representation of inp
+  MemoryType StringToMemoryType(std::string inp);
+
+  bool MemHelper(StrBuff& b, ExprVarMap& l, ExprPtr& old, ExprPtr& next);
 
   /// Get the project name.
   inline std::string GetProjectName() const { return m_->name().str(); }
