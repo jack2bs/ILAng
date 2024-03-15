@@ -25,25 +25,63 @@ void Aladdin_Ilator::DfsExpr(const ExprPtr& e, StrBuff& buff, ExprVarMap& lut) {
   ILA_ASSERT((e->is_mem() && e->is_op()) || (lut.find(e) != lut.end()));
 }
 
-void Aladdin_Ilator::DfsVar(const ExprPtr& expr, StrBuff& buff, ExprVarMap& lut) const {
+void Aladdin_Ilator::DfsVar(const ExprPtr& expr, StrBuff& buff,
+                            ExprVarMap& lut) const {
   auto [it, status] = lut.try_emplace(expr, GetCName(expr));
   ILA_ASSERT(status);
   // no need to define new variable
 }
 
-void Aladdin_Ilator::DfsConst(const ExprPtr& expr, StrBuff& buff, ExprVarMap& lut) {
+void Aladdin_Ilator::DfsConst(const ExprPtr& expr, StrBuff& buff,
+                              ExprVarMap& lut) {
   auto local_var = GetLocalVar(lut);
   auto [it, status] = lut.try_emplace(expr, local_var);
   ILA_ASSERT(status);
 
   // alias for constant memory
-  static const char* kConstMemTemplate = "{type} {local_var} = {const_mem};\\\n";
   if (expr->is_mem()) {
-    fmt::format_to(buff, kConstMemTemplate,
-                   fmt::arg("type", GetCType(expr)),
-                   fmt::arg("local_var", local_var),
-                   fmt::arg("const_mem", GetCName(expr)));
+
     const_mems_.insert(expr);
+
+    SortPtr sort = expr->sort();
+
+    if (sort->data_width() > 1) {
+      fmt::format_to(buff,
+                     "_BitInt({data_width}) * {local_var} = {const_mem};\n",
+                     fmt::arg("local_var", local_var),
+                     fmt::arg("data_width", sort->data_width()),
+                     fmt::arg("const_mem", GetCName(expr)));
+    } else {
+      fmt::format_to(buff, "bool * {local_var} = {const_mem};\n",
+                     fmt::arg("local_var", local_var),
+                     fmt::arg("const_mem", GetCName(expr)));
+    }
+
+    // static const char* kConstMemTemplate = "{type} {local_var} =
+    // {const_mem};\n"; fmt::format_to(buff, kConstMemTemplate,
+    //                fmt::arg("type", GetCType(expr)),
+    //                fmt::arg("local_var", local_var),
+    //                fmt::arg("const_mem", GetCName(expr)));
+
+    // auto const_mem = std::dynamic_pointer_cast<ExprConst>(expr);
+    // const auto& val_map = const_mem->val_mem()->val_map();
+    // static const char* kMemStoreTemplate =
+    //   "_BitInt({addr_width}) {local_var} = {address};\n"
+    //   "_BitInt({data_width}) {local_var}_{ind}_data = {data};\n";
+
+    // int i = 0;
+    // for (auto& it : val_map) {
+    //   i++;
+    //   fmt::format_to(buff, kMemStoreTemplate,
+    //                   fmt::arg("local_var", local_var),
+    //                   fmt::arg("address", it.first),
+    //                   fmt::arg("data", it.second),
+    //                   fmt::arg("addr_width",
+    //                   const_mem->sort()->addr_width()),
+    //                   fmt::arg("data_width",
+    //                   const_mem->sort()->data_width()), fmt::arg("ind", i));
+    // }
+
     return;
   }
 
@@ -57,14 +95,15 @@ void Aladdin_Ilator::DfsConst(const ExprPtr& expr, StrBuff& buff, ExprVarMap& lu
     value = std::to_string(expr_const->val_bv()->val());
   }
   static const char* kConstNonMemTemplate =
-      "{var_type} {local_var} = {const_value};\\\n";
+      "{var_type} {local_var} = {const_value};\n";
   fmt::format_to(buff, kConstNonMemTemplate, //
                  fmt::arg("var_type", GetCType(expr)),
                  fmt::arg("local_var", local_var),
                  fmt::arg("const_value", value));
 }
 
-void Aladdin_Ilator::DfsOp(const ExprPtr& expr, StrBuff& buff, ExprVarMap& lut) {
+void Aladdin_Ilator::DfsOp(const ExprPtr& expr, StrBuff& buff,
+                           ExprVarMap& lut) {
   // store, ite-mem
   if (expr->is_mem()) {
     DfsOpMemory(expr, buff, lut);
@@ -99,7 +138,8 @@ void Aladdin_Ilator::DfsOp(const ExprPtr& expr, StrBuff& buff, ExprVarMap& lut) 
   };
 }
 
-void Aladdin_Ilator::DfsOpMemory(const ExprPtr& expr, StrBuff& buff, ExprVarMap& lut) {
+void Aladdin_Ilator::DfsOpMemory(const ExprPtr& expr, StrBuff& buff,
+                                 ExprVarMap& lut) {
   // TODO CHECK DMA STUFF
 
   auto local_var = GetLocalVar(lut);
@@ -107,10 +147,10 @@ void Aladdin_Ilator::DfsOpMemory(const ExprPtr& expr, StrBuff& buff, ExprVarMap&
   ILA_ASSERT(status);
 
   if (auto uid = asthub::GetUidExprOp(expr); uid == AstUidExprOp::kStore) {
-    
-    static const char* kMemStoreTemplate = 
-        "{addr_type} {local_var}_addr = {address};\\\n"
-        "{data_type} {local_var}_data = {data};\\\n";
+
+    static const char* kMemStoreTemplate =
+        "{addr_type} {local_var}_addr = {address};\n"
+        "{data_type} {local_var}_data = {data};\n";
 
     fmt::format_to(buff, kMemStoreTemplate,
                    fmt::arg("addr_type", GetCType(expr->arg(1))),
@@ -121,10 +161,9 @@ void Aladdin_Ilator::DfsOpMemory(const ExprPtr& expr, StrBuff& buff, ExprVarMap&
 
   } else { // ite
 
-    // static const char* kMemStoreTemplate = 
-    //     "_BitInt({addr_width}) {local_var}_addr = {store_var}_addr;\\\n"
-    //     "_BitInt({data_width}) {local_var}_data = {store_var}_data;\\\n";
-
+    // static const char* kMemStoreTemplate =
+    //     "_BitInt({addr_width}) {local_var}_addr = {store_var}_addr;\n"
+    //     "_BitInt({data_width}) {local_var}_data = {store_var}_data;\n";
 
     // fmt::format_to(buff, "if ({}) {{\n", LookUp(expr->arg(0), lut));
     // fmt::format_to(buff, kMemStoreTemplate,
@@ -142,7 +181,8 @@ void Aladdin_Ilator::DfsOpMemory(const ExprPtr& expr, StrBuff& buff, ExprVarMap&
   }
 }
 
-void Aladdin_Ilator::DfsOpAppFunc(const ExprPtr& expr, StrBuff& buff, ExprVarMap& lut) {
+void Aladdin_Ilator::DfsOpAppFunc(const ExprPtr& expr, StrBuff& buff,
+                                  ExprVarMap& lut) {
   ILA_CHECK(!expr->is_mem()) << "Func returning memory not supported yet";
 
   auto local_var = GetLocalVar(lut);
@@ -159,23 +199,23 @@ void Aladdin_Ilator::DfsOpAppFunc(const ExprPtr& expr, StrBuff& buff, ExprVarMap
     arguments.push_back(LookUp(app_func->arg(i), lut));
   }
 
-  static const char* kAppFuncTemplate =
-      "{return_type} {return_var} = 0;\\\n";
-  fmt::format_to(buff, kAppFuncTemplate, //
-                 fmt::arg("return_type", GetCType(expr)),
-                 fmt::arg("return_var", local_var));
-
-
   // static const char* kAppFuncTemplate =
-  //     "{return_type} {return_var} = {func_name}({argument_list});\\\n";
+  //     "{return_type} {return_var} = 0;\n";
   // fmt::format_to(buff, kAppFuncTemplate, //
   //                fmt::arg("return_type", GetCType(expr)),
-  //                fmt::arg("return_var", local_var),
-  //                fmt::arg("func_name", func_cxx->name),
-  //                fmt::arg("argument_list", fmt::join(arguments, ", ")));
+  //                fmt::arg("return_var", local_var));
+
+  static const char* kAppFuncTemplate =
+      "{return_type} {return_var} = {func_name}({argument_list});\n";
+  fmt::format_to(buff, kAppFuncTemplate, //
+                 fmt::arg("return_type", GetCType(expr)),
+                 fmt::arg("return_var", local_var),
+                 fmt::arg("func_name", func_cxx->name),
+                 fmt::arg("argument_list", fmt::join(arguments, ", ")));
 }
 
-void Aladdin_Ilator::DfsOpSpecial(const ExprPtr& expr, StrBuff& buff, ExprVarMap& lut) {
+void Aladdin_Ilator::DfsOpSpecial(const ExprPtr& expr, StrBuff& buff,
+                                  ExprVarMap& lut) {
   auto local_var = GetLocalVar(lut);
   auto [it, status] = lut.try_emplace(expr, local_var);
   ILA_ASSERT(status);
@@ -184,48 +224,44 @@ void Aladdin_Ilator::DfsOpSpecial(const ExprPtr& expr, StrBuff& buff, ExprVarMap
   case AstUidExprOp::kLoad: {
     // TODO CHECK IS DMA
 
-    if (memory_types.at(expr->arg(0)) != dma) {
-      static const char* kLoadTemplate =
-          "{return_type} {local_var} = {memory_source}[{address}];\\\n";
-      fmt::format_to(buff, kLoadTemplate, //
-                    fmt::arg("return_type", GetCType(expr)),
-                    fmt::arg("local_var", local_var),
-                    fmt::arg("memory_source", LookUp(expr->arg(0), lut)),
-                    fmt::arg("address", LookUp(expr->arg(1), lut))
+    if (memory_types.find(expr->arg(0)) == memory_types.end() ||
+        memory_types.at(expr->arg(0)) == host) {
 
-      );
-    }
-    else
-    {
       static const char* kLoadTemplate =
-          "dmaLoad(&dma_var, {memory_source} + {address}, {word_size});\\\n"
-          "{return_type} {local_var} = ({return_type})dma_var;\\\n";
+          "hostLoad(&dma_var, {memory_source} + {address}, {word_size});\n"
+          "{return_type} {local_var} = ({return_type})dma_var;\n";
       uint64_t wordSize = GetWordSize(expr);
       fmt::format_to(buff, kLoadTemplate, //
-                    fmt::arg("return_type", GetCType(expr)),
-                    fmt::arg("local_var", local_var),
-                    fmt::arg("memory_source", LookUp(expr->arg(0), lut)),
-                    fmt::arg("address", LookUp(expr->arg(1), lut)),
-                    fmt::arg("word_size", wordSize));
-      if (wordSize > biggestDMA)
-      {
+                     fmt::arg("return_type", GetCType(expr)),
+                     fmt::arg("local_var", local_var),
+                     fmt::arg("memory_source", LookUp(expr->arg(0), lut)),
+                     fmt::arg("address", LookUp(expr->arg(1), lut)),
+                     fmt::arg("word_size", wordSize));
+      if (wordSize > biggestDMA) {
         biggestDMA = wordSize;
       }
-      if (dmaGCD == (size_t)-1)
-      {
+      if (dmaGCD == (size_t)-1) {
         dmaGCD = wordSize;
-      }
-      else
-      {
+      } else {
         dmaGCD = std::gcd(dmaGCD, wordSize);
-      }     
+      }
+    } else {
+      static const char* kLoadTemplate =
+          "{return_type} {local_var} = {memory_source}[{address}];\n";
+      fmt::format_to(buff, kLoadTemplate, //
+                     fmt::arg("return_type", GetCType(expr)),
+                     fmt::arg("local_var", local_var),
+                     fmt::arg("memory_source", LookUp(expr->arg(0), lut)),
+                     fmt::arg("address", LookUp(expr->arg(1), lut))
+
+      );
     }
     break;
   }
   case AstUidExprOp::kConcatenate: {
     static const char* kConcatTemplate =
         "{return_type} {local_var} = (((({type}){arg_0}) << {arg1_width}) "
-        "| (({type}){arg_1}));\\\n";
+        "| (({type}){arg_1}));\n";
     auto arg0 = expr->arg(0);
     auto arg1 = expr->arg(1);
     auto arg1_width = expr->arg(1)->sort()->bit_width();
@@ -241,7 +277,8 @@ void Aladdin_Ilator::DfsOpSpecial(const ExprPtr& expr, StrBuff& buff, ExprVarMap
   // MAKE SURE THAT RETURN TYPE IS THE CORRECT WIDTH
   case AstUidExprOp::kExtract: {
     static const char* kExtractTemplate =
-        "{return_type} {extract} = (({return_type}) ({origin} >> {loc_low}));\\\n";
+        "{return_type} {extract} = (({return_type}) ({origin} >> "
+        "{loc_low}));\n";
     fmt::format_to(buff, kExtractTemplate, //
                    fmt::arg("return_type", GetCType(expr)),
                    fmt::arg("extract", local_var),
@@ -252,29 +289,29 @@ void Aladdin_Ilator::DfsOpSpecial(const ExprPtr& expr, StrBuff& buff, ExprVarMap
   // LEFT OFF HERE
   case AstUidExprOp::kZeroExtend: {
     static const char* kExtendTemplate =
-        "{return_type} {extend} = (unsigned {old_type}) {origin};\\\n";
+        "{return_type} {extend} = (unsigned {old_type}) {origin};\n";
     auto origin_expr = expr->arg(0);
     fmt::format_to(buff, kExtendTemplate, //
                    fmt::arg("return_type", GetCType(expr)),
                    fmt::arg("extend", local_var),
                    fmt::arg("old_type", GetCType(origin_expr))),
-                   fmt::arg("origin", LookUp(origin_expr, lut));
+        fmt::arg("origin", LookUp(origin_expr, lut));
     break;
   }
   case AstUidExprOp::kSignedExtend: {
     static const char* kExtendTemplate =
-        "{return_type} {extend} = (signed {old_type}) {origin};\\\n";
+        "{return_type} {extend} = (signed {old_type}) {origin};\n";
     auto origin_expr = expr->arg(0);
     fmt::format_to(buff, kExtendTemplate, //
                    fmt::arg("return_type", GetCType(expr)),
                    fmt::arg("extend", local_var),
                    fmt::arg("old_type", GetCType(origin_expr))),
-                   fmt::arg("origin", LookUp(origin_expr, lut));
+        fmt::arg("origin", LookUp(origin_expr, lut));
     break;
   }
   case AstUidExprOp::kImply: {
     static const char* kImplyTemplate =
-        "{return_type} {local_var} = (~{if_var}) & {then_var};\\\n";
+        "{return_type} {local_var} = (~{if_var}) & {then_var};\n";
     fmt::format_to(buff, kImplyTemplate, //
                    fmt::arg("return_type", GetCType(expr)),
                    fmt::arg("local_var", local_var),
@@ -284,7 +321,8 @@ void Aladdin_Ilator::DfsOpSpecial(const ExprPtr& expr, StrBuff& buff, ExprVarMap
   }
   case AstUidExprOp::kIfThenElse: {
     static const char* kIteTemplate =
-        "{return_type} {local_var} = ({condition}) ? {true_branch} : {false_branch};\\\n";
+        "{return_type} {local_var} = ({condition}) ? {true_branch} : "
+        "{false_branch};\n";
     fmt::format_to(buff, kIteTemplate, //
                    fmt::arg("return_type", GetCType(expr)),
                    fmt::arg("local_var", local_var),
@@ -324,7 +362,7 @@ static const std::unordered_map<AstUidExprOp, std::string> kOpSymbols = {
     {AstUidExprOp::kUnsignedRemainder, "%"}};
 
 void Aladdin_Ilator::DfsOpRegular(const ExprPtr& expr, StrBuff& buff,
-                          ExprVarMap& lut) const {
+                                  ExprVarMap& lut) const {
   auto local_var = GetLocalVar(lut);
   auto [it, status] = lut.try_emplace(expr, local_var);
   ILA_ASSERT(status);
@@ -335,9 +373,9 @@ void Aladdin_Ilator::DfsOpRegular(const ExprPtr& expr, StrBuff& buff,
   ILA_ASSERT(pos != kOpSymbols.end()) << uid;
 
   static const char* kUnaryOpTemplate =
-      "{var_type} {local_var} = {unary_op}{arg_0};\\\n";
+      "{var_type} {local_var} = {unary_op}{arg_0};\n";
   static const char* kBinaryOpTemplate =
-      "{var_type} {local_var} = ({arg_0} {binary_op} {arg_1});\\\n";
+      "{var_type} {local_var} = ({arg_0} {binary_op} {arg_1});\n";
 
   if (expr->arg_num() == 1) {
     fmt::format_to(buff, kUnaryOpTemplate, //

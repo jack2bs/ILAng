@@ -38,7 +38,7 @@ private:
   /// Internal type of Expr to var name look-up table.
   typedef std::unordered_map<ExprPtr, std::string, ExprHash> ExprVarMap;
   /// Internal type of the memory
-  typedef enum _MemoryType { spad, reg, dma, acp, cache, end_mem_type } MemoryType;
+  typedef enum _MemoryType { spad, host, end_mem_type } MemoryType;
   /// Internal type to manage functions.
   class CxxFunc {
   public:
@@ -85,14 +85,14 @@ private:
   // Decides whether the inputs should be dma, cache, acp, or spad
   MemoryType input_memory_type;
 
-  /// Generated sources files.
-  std::set<std::string> source_files_;
   /// Constant memory that needs to be initialzied.
   std::set<ExprPtr> const_mems_;
-  /// Global variables other than state variables.
-  std::set<ExprPtr> global_vars_;
+
+  std::string sourcesList = "";
 
   StrBuff computeDecl;
+
+  StrBuff validAndDecodeFunc;
 
   size_t biggestDMA = 0;
   size_t dmaGCD = -1;
@@ -119,6 +119,8 @@ private:
   bool GenerateInitialSetup(const std::string& dir);
   /// Generate the instruction scheduler and driver.
   bool GenerateExecuteKernel(const std::string& dir);
+  /// Generate the valid and decode functions simulator
+  bool GenerateSim(const std::string& dir);
   /// Generate the shared header files.
   bool GenerateGlobalHeader(const std::string& dir);
   /// Generate the CMake recipe and other placeholders.
@@ -161,6 +163,7 @@ private:
 
   /// Start function definition.
   void BeginFuncDef(CFunc* func, StrBuff& buff) const;
+  void BeginValidDecodeFuncDef(Aladdin_Ilator::CFunc* func, StrBuff& buff) const;
   /// Start macro definition
   void BeginMacroDef(CFunc* func, StrBuff& buff) const;
   /// Finish function definition.
@@ -181,7 +184,12 @@ private:
   /// Returns the MemoryType representation of inp
   MemoryType StringToMemoryType(std::string inp);
 
+
+  void DMAVarAdj(int wordSize);
+
   bool MemHelper(StrBuff& b, ExprVarMap& l, ExprPtr& old, ExprPtr& next);
+
+  void AddParametersToBuffer(StrBuff& b, bool withDataTypes, std::string separator = ",\n") const;
 
   /// Get the project name.
   inline std::string GetProjectName() const { return m_->name().str(); }
