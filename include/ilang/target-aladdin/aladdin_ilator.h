@@ -39,6 +39,15 @@ private:
   typedef std::unordered_map<ExprPtr, std::string, ExprHash> ExprVarMap;
   /// Internal type of the memory
   typedef enum _MemoryType { spad, host, end_mem_type } MemoryType;
+
+  /// Internal type to manage memory structures
+  typedef struct _MemoryInformation {
+    MemoryType mt = end_mem_type;
+    uint64_t size = 0;
+    uint64_t startAddr = 0;
+    uint64_t banks = 0;
+  } MemoryInformation;
+
   /// Internal type to manage functions.
   class CxxFunc {
   public:
@@ -81,9 +90,7 @@ private:
   /// Wrapper functions to update memory values.
   std::map<std::string, CFunc*> memory_updates_;
   // Contains the types for each of the memory states
-  std::map<ExprPtr, MemoryType> memory_types;
-  // Decides whether the inputs should be dma, cache, acp, or spad
-  MemoryType input_memory_type;
+  std::map<ExprPtr, MemoryInformation> memory_types;
 
   /// Constant memory that needs to be initialzied.
   std::set<ExprPtr> const_mems_;
@@ -179,6 +186,8 @@ private:
   void AddConfigLineToBuff(const ilang::ExprPtr & var, StrBuff & buff);
   /// Gets cin input for the memory type
   MemoryType GetMemoryTypeInput();
+  /// Gets cin input for an integer type
+  uint64_t GetIntegerInput();
   /// Returns the string representation of inp
   std::string MemoryTypeToString(MemoryType inp);
   /// Returns the MemoryType representation of inp
@@ -227,6 +236,8 @@ private:
   static uint64_t GetWordSize(const ExprPtr & expr);
   /// Get the number of bytes this variable takes up in mem
   static uint64_t GetNumBytes(const ExprPtr & expr);
+  /// Get the number of bits to (not overflow the) address of a memory of a certain size
+  static uint64_t MemSizeToAddressBits(uint64_t memSize, int wordSize);
 
   /// Helper for look up variable name in the table.
   inline std::string LookUp(const ExprPtr& e, const ExprVarMap& lut) const {

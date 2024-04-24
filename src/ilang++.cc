@@ -761,9 +761,9 @@ void ImportChildSynthAbstraction(const std::string& file_name, Ila& parent,
 }
 #endif // SYNTH_INTERFACE
 
-void ExportSysCSim(const Ila& ila, const std::string& dir_path, bool opt) {
+void ExportSysCSim(const Ila& ila, const std::string& dir_path, bool opt, bool pwr) {
   auto ilator = Ilator(ila.get());
-  ilator.Generate(dir_path, opt);
+  ilator.Generate(dir_path, opt, pwr);
 }
 
 void ExportAladdinSim(const Ila& ila, const std::string& dir_path, bool opt) {
