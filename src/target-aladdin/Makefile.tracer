@@ -70,7 +70,7 @@ $(EXEC)-instrumented: full.s
 	clang++ -no-pie -O0 -fno-inline -o $@ $< -lm -lz -lpthread
 
 %-opt.llvm: %.c labelmap
-	@$(eval CC1_COMMAND=$(shell clang -static -g -O1 -S -fno-slp-vectorize \
+	@$(eval CC1_COMMAND=$(shell clang -static -g -O2 -S -fno-slp-vectorize \
 		-fno-vectorize -fno-unroll-loops -fno-inline -fno-builtin \
 		-emit-llvm \
 		$(CPPFLAGS) \

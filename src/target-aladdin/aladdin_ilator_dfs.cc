@@ -9,6 +9,9 @@
 #include <ilang/ila/ast_hub.h>
 #include <ilang/util/log.h>
 
+#include <bit>
+
+
 namespace ilang {
 
 void Aladdin_Ilator::DfsExpr(const ExprPtr& e, StrBuff& buff, ExprVarMap& lut) {
@@ -225,7 +228,7 @@ void Aladdin_Ilator::DfsOpSpecial(const ExprPtr& expr, StrBuff& buff,
     // TODO CHECK IS DMA
 
     if (memory_types.find(expr->arg(0)) == memory_types.end() ||
-        memory_types.at(expr->arg(0)) == host) {
+        memory_types.at(expr->arg(0)).mt == host) {
 
       static const char* kLoadTemplate =
           "hostLoad(&dma_var, {memory_source} + {address}, {word_size});\n"
@@ -247,11 +250,14 @@ void Aladdin_Ilator::DfsOpSpecial(const ExprPtr& expr, StrBuff& buff,
       }
     } else {
       static const char* kLoadTemplate =
-          "{return_type} {local_var} = {memory_source}[{address}];\n";
+          // "printf(\"%d\\n\", {address}); // to prevent it's calculation being optimized away\n"
+          "{return_type} {local_var} = {memory_source}[(unsigned _BitInt({bitwidth})){address}];\n";
       fmt::format_to(buff, kLoadTemplate, //
                      fmt::arg("return_type", GetCType(expr)),
                      fmt::arg("local_var", local_var),
                      fmt::arg("memory_source", LookUp(expr->arg(0), lut)),
+                    //  fmt::arg("fake_address", rand() % memory_types.at(expr->arg(0)).size),
+                     fmt::arg("bitwidth", MemSizeToAddressBits(memory_types.at(expr->arg(0)).size, GetWordSize(expr->arg(0)))),
                      fmt::arg("address", LookUp(expr->arg(1), lut))
 
       );
@@ -260,8 +266,7 @@ void Aladdin_Ilator::DfsOpSpecial(const ExprPtr& expr, StrBuff& buff,
   }
   case AstUidExprOp::kConcatenate: {
     static const char* kConcatTemplate =
-        "{return_type} {local_var} = (((({type}){arg_0}) << {arg1_width}) "
-        "| (({type}){arg_1}));\n";
+        "{return_type} {local_var} = (((({type}){arg_0}) << {arg1_width}) | (({type}){arg_1}));\n";
     auto arg0 = expr->arg(0);
     auto arg1 = expr->arg(1);
     auto arg1_width = expr->arg(1)->sort()->bit_width();

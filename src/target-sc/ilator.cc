@@ -68,7 +68,10 @@ Ilator::Ilator(const InstrLvlAbsPtr& m) : m_(m) {}
 
 Ilator::~Ilator() { Reset(); }
 
-void Ilator::Generate(const std::string& dst, bool opt) {
+void Ilator::Generate(const std::string& dst, bool opt, bool pwr) {
+
+  this->pwr = pwr;
+
   // sanity checks and initialize
   if (!SanityCheck() || !Bootstrap(dst, opt)) {
     return;
@@ -93,6 +96,12 @@ void Ilator::Generate(const std::string& dst, bool opt) {
 
   // initial condition setup
   status &= GenerateInitialSetup(os_portable_append_dir(dst, kDirSrc));
+
+  // pwr models
+  if (pwr)
+  {
+    status &= GeneratePowerParser(os_portable_append_dir(dst, kDirSrc));
+  }
 
   // execution kernel
   status &= GenerateExecuteKernel(os_portable_append_dir(dst, kDirSrc));
@@ -303,6 +312,10 @@ bool Ilator::GenerateInstrContent(const InstrPtr& instr,
     }
   }
   fmt::format_to(buff, "instr_update_log << std::endl;\n");
+  if (pwr)
+  {
+    fmt::format_to(buff, "IlaPPALog(\"{}\", __FUNCTION__);\n", instr->name().str());
+  }
   fmt::format_to(buff, "#endif\n");
 
   EndFuncDef(update_func, buff);
@@ -477,6 +490,122 @@ bool Ilator::GenerateInitialSetup(const std::string& dir) {
   return true;
 }
 
+bool Ilator::GeneratePowerParser(const std::string& dir) {
+  StrBuff buff;
+
+  fmt::format_to(buff,
+  "#include <fstream>\n"
+  "#include <map>\n"
+  "#include <sstream>\n"
+  "#include <string>\n"
+  "#include <vector>\n"
+  "#include <iomanip>\n"
+  "#include \"hlscnn.h\"\n"
+  "\n"
+  "#define FUNC_NAME_IND 0\n"
+  "#define CYCLES_IND 1\n"
+  "#define FU_DYN_PWR_IND 2\n"
+  "#define FU_LEAK_PWR_IND 3\n"
+  "#define MEM_DYN_PWR_IND 4\n"
+  "#define MEM_LEAK_PWR_IND 5\n"
+  "#define FU_AREA_IND 6\n"
+  "#define MEM_AREA_IND 7\n"
+  "\n"
+  "\n"
+  "void hlscnn::IlaPPAModel() {{\n"
+  "  std::ifstream inp(\"../app/sim_info/ppa_models.csv\", std::ios::in);\n"
+  "  std::string line;\n"
+  "  while (std::getline(inp, line)) {{\n"
+  "    std::vector<std::string> line_fields;\n"
+  "    std::stringstream s(line);\n"
+  "    std::string word;\n"
+  "    while (std::getline(s, word, ',')) {{\n"
+  "      line_fields.push_back(word);\n"
+  "    }}\n"
+  "\n"
+  "    if (line_fields.at(FUNC_NAME_IND).find(\"update_sim_seq\") !=\n"
+  "            std::string::npos) {{\n"
+  "      fuLeakagePower += std::stod(line_fields.at(FU_LEAK_PWR_IND));\n"
+  "      fuArea += std::stod(line_fields.at(FU_AREA_IND));\n"
+  "      instr_map.insert({{line_fields.at(FUNC_NAME_IND),\n"
+  "                        InstrPPAModel{{stoi(line_fields.at(CYCLES_IND)),\n"
+  "                                      stod(line_fields.at(FU_DYN_PWR_IND)),\n"
+  "                                      stod(line_fields.at(MEM_DYN_PWR_IND))}}}});\n"
+  "      continue;\n"
+  "    }}\n"
+  "\n"
+  "    if (line_fields.at(FUNC_NAME_IND).find(\"get_base_leakage\") !=\n"
+  "        std::string::npos) {{\n"
+  "      memLeakagePower += std::stod(line_fields.at(MEM_LEAK_PWR_IND));\n"
+  "      memArea += std::stod(line_fields.at(MEM_AREA_IND));\n"
+  "      continue;\n"
+  "    }}\n"
+  "\n"
+  "    if (line_fields.at(FUNC_NAME_IND).find(\"update_\") == 0) {{\n"
+  "      instr_map.insert({{line_fields.at(FUNC_NAME_IND),\n"
+  "                        InstrPPAModel{{stoi(line_fields.at(CYCLES_IND)),\n"
+  "                                      stod(line_fields.at(FU_DYN_PWR_IND)),\n"
+  "                                      stod(line_fields.at(MEM_DYN_PWR_IND))}}}});\n"
+  "    }}\n"
+  "\n"
+  "  if (line_fields.at(FUNC_NAME_IND).find(\"valid_decode_sim_parallel\") !=\n"
+  "      std::string::npos) {\n"
+  "        \n"
+  "    instr_map.insert({line_fields.at(FUNC_NAME_IND),\n"
+  "                      InstrPPAModel{stoi(line_fields.at(CYCLES_IND)),\n"
+  "                                    stod(line_fields.at(FU_DYN_PWR_IND)),\n"
+  "                                    stod(line_fields.at(MEM_DYN_PWR_IND))}});\n"
+  "  }\n"
+  "\n"
+  "  }}\n"
+  "}}\n"
+  "\n"
+  "void hlscnn::IlaPPALog(const std::string instr_name, const std::string upd_fn_name)\n"
+  "{{\n"
+  "  int decCycles = instr_map.at(\"valid_decode_sim_parallel\").cycles;\n"
+  "  double decFuPwr = instr_map.at(\"valid_decode_sim_parallel\").fuDynamicPower;\n"
+  "  double decMemPwr = instr_map.at(\"valid_decode_sim_parallel\").memDynamicPower;\n"
+  "  int cycles = instr_map.at(upd_fn_name).cycles;\n"
+  "  double fuPwr = instr_map.at(upd_fn_name).fuDynamicPower;\n"
+  "  double memPwr = instr_map.at(upd_fn_name).memDynamicPower;\n"
+  "  instr_pwr_log << \"Decode No.\" << std::setw(5) << GetInstrCntr() << '\\n';\n"
+  "  instr_pwr_log << \"    cycles: \" << cycle_tracker << \" - \" << cycle_tracker + decCycles;\n"
+  "  instr_pwr_log << \"    (\" << decCycles << \" cycles elapsed)\" << '\\n';\n"
+  "  instr_pwr_log << \"    Average power per cycle (mem + fu): \" << decFuPwr + decMemPwr  + fuLeakagePower + memLeakagePower << \"mw\" << '\\n';\n"
+  "  instr_pwr_log << \"    Average functional unit power per cycle: \" << decFuPwr + fuLeakagePower << \"mw\" << '\\n';\n"
+  "  instr_pwr_log << \"    Average memory power per cycle: \" << decMemPwr + memLeakagePower << \"mw\" << '\\n';\n"
+  "\n"
+  "  summed_power += decCycles * (decFuPwr + decMemPwr + fuLeakagePower + memLeakagePower);\n"
+  "  cycle_tracker += decCycles;\n"  
+  "  instr_pwr_log << \"Instr No.\" << std::setw(5) << GetInstrCntr() << \"  \" << instr_name << '\\n';\n"
+  "  instr_pwr_log << \"    cycles: \" << cycle_tracker << \" - \" << cycle_tracker + cycles;\n"
+  "  instr_pwr_log << \"    (\" << cycles << \" cycles elapsed)\" << '\\n';\n"
+  "  instr_pwr_log << \"    Average power per cycle (mem + fu): \" << fuPwr + memPwr + fuLeakagePower + memLeakagePower << \"mw\" << '\\n';\n"
+  "  instr_pwr_log << \"    Average functional unit power per cycle: \" << fuPwr + fuLeakagePower << \"mw\" << '\\n';\n"
+  "  instr_pwr_log << \"    Average memory power per cycle: \" << memPwr + memLeakagePower << \"mw\" << \"\\n\\n\";\n"
+  "\n"
+  "  summed_power += cycles * (fuPwr + memPwr + fuLeakagePower + memLeakagePower);\n"
+  "  cycle_tracker += cycles;\n"
+  "}}\n"
+  "void hlscnn::IlaPPAFinishLog()\n"
+  "{{\n"
+  "  instr_pwr_log << \"\\n\\n\";\n"
+  "  instr_pwr_log << \"Total cycles: \" << cycle_tracker << '\\n';\n"
+  "  instr_pwr_log << \"Avg power per cycle: \" << summed_power / cycle_tracker << \"mw\\n\";\n"
+  "  instr_pwr_log << \"Total area: \" << fuArea + memArea << \"uM^2\" << '\\n';\n"
+  "  instr_pwr_log << \"Functional unit area: \" << fuArea << \"uM^2\" << '\\n';\n"
+  "  instr_pwr_log << \"Memory area: \" << memArea << \"uM^2\" << '\\n';\n"
+  "}}\n"
+
+
+  );
+  
+  CommitSource("ppa_parser.cc", dir, buff);
+
+  return true;
+}
+
+
 bool Ilator::GenerateExecuteKernel(const std::string& dir) {
   StrBuff buff;
 
@@ -510,6 +639,7 @@ bool Ilator::GenerateExecuteKernel(const std::string& dir) {
   // setup initial condition
   fmt::format_to(buff, "if (!g_initialized) {{\n"
                        "  setup_initial_condition();\n"
+                       "  IlaPPAModel();\n"
                        "  g_initialized = true;\n"
                        "}}\n");
 
@@ -585,6 +715,29 @@ bool Ilator::GenerateGlobalHeader(const std::string& dir) {
                  "  void IncrementInstrCntr();\n"
                  "  void LogInstrSequence(const std::string& instr_name);\n",
                  fmt::arg("project", GetProjectName()));
+
+  if (pwr) {
+    fmt::format_to(buff,
+                   "  struct InstrPPAModel {{\n"
+                   "    int cycles;\n"
+                   "    double fuDynamicPower;\n"
+                   "    double memDynamicPower;\n"
+                   "  }};\n"
+                   "  double fuLeakagePower = 0.0;\n"
+                   "  double memLeakagePower = 0.0;\n"
+                   "  double fuArea = 0.0;\n"
+                   "  double memArea = 0.0;\n"
+                   "  double summed_power = 0.0;\n"
+                   "  size_t cycle_tracker = 0;\n"
+                   "  std::map<std::string, InstrPPAModel> instr_map;\n"
+                   "  void IlaPPAModel();\n"
+                   "  void IlaPPALog(const std::string instr_name, const std::string upd_fn_name);\n"
+                   "  void IlaPPAFinishLog();\n"
+                   "  std::ofstream instr_pwr_log;\n"
+                   "  void LogInstrPwr(const std::string& update_func_name);\n"
+
+    );
+  }
 
   // input
   for (auto& var : absknob::GetInp(m_)) {

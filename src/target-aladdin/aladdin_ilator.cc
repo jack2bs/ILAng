@@ -63,10 +63,7 @@ static bool HasLoadFromStore(const ExprPtr& expr) {
 // Aladdin_Ilator implementation
 //
 
-Aladdin_Ilator::Aladdin_Ilator(const InstrLvlAbsPtr& m) : m_(m) {
-
-  input_memory_type = end_mem_type;
-}
+Aladdin_Ilator::Aladdin_Ilator(const InstrLvlAbsPtr& m) : m_(m) {}
 
 Aladdin_Ilator::~Aladdin_Ilator() { Reset(); }
 
@@ -179,6 +176,23 @@ Aladdin_Ilator::MemoryType Aladdin_Ilator::GetMemoryTypeInput() {
   return end_mem_type;
 }
 
+uint64_t Aladdin_Ilator::GetIntegerInput() {
+  std::string nextLine;
+  std::cin >> nextLine;
+
+  uint64_t inp = 0;
+  if (nextLine.find("0x") == 0) {
+    inp = std::stoul(nextLine, nullptr, 16);
+  } else if (nextLine.find("0b") == 0) {
+    inp = std::stoul(nextLine, nullptr, 2);
+  } else // use dec
+  {
+    inp = std::stoul(nextLine, nullptr, 10);
+  }
+
+  return inp;
+}
+
 std::string Aladdin_Ilator::MemoryTypeToString(MemoryType inp) {
   switch (inp) {
   case spad:
@@ -223,60 +237,125 @@ bool Aladdin_Ilator::GetInformationFromUser(const std::string& dir) {
     ss << input_file.rdbuf();
     file_string = ss.str();
 
-    int pos = file_string.find("InputMemType[");
-    if (pos != std::string::npos) {
-      std::string asStr = file_string.substr(pos, file_string.find(']', pos));
-      input_memory_type = StringToMemoryType(asStr);
-      fmt::format_to(buff, "InputMemType[{}]\n",
-                     MemoryTypeToString(input_memory_type));
-    }
-
-    for (int i = 0; i < m_->state_num(); i++) {
-      ExprPtr var = m_->state(i);
+    for (auto& varr : absknob::GetSttTree(m_)) {
+      ExprPtr var = varr;
       if (var->is_mem()) {
 
         int pos = file_string.find(var->name().str() + "MemType[");
         if (pos != std::string::npos) {
           std::string asStr =
-              file_string.substr(pos, file_string.find(']', pos));
-          memory_types.insert({var, StringToMemoryType(asStr)});
-          fmt::format_to(buff, "{}MemType[{}]\n", var->name().str(),
-                         MemoryTypeToString(memory_types.at(var)));
+              file_string.substr(pos, file_string.find(']', pos) - pos);
+          memory_types.insert({var, {StringToMemoryType(asStr), 0, 0, 0}});
+
+          std::stringstream size_str;
+          size_str << "";
+          std::stringstream start_addr_str;
+          start_addr_str << "";
+          std::stringstream num_banks;
+          start_addr_str << "";
+
+          if (memory_types.at(var).mt == spad) {
+            std::string sizeVal =
+                asStr.substr(asStr.find(",size=") + sizeof(",size=") - 1);
+
+            int size = 0;
+            if (sizeVal.find("0x") == 0) {
+              size = std::stoul(sizeVal, nullptr, 16);
+            } else if (sizeVal.find("0b") == 0) {
+              size = std::stoul(sizeVal, nullptr, 2);
+            } else // use dec
+            {
+              size = std::stoul(sizeVal, nullptr, 10);
+            }
+
+            std::string addrVal = asStr.substr(asStr.find(",start_address=") +
+                                               sizeof(",start_address=") - 1);
+            int startAddr = 0;
+
+            if (addrVal.find("0x") == 0) {
+              startAddr = std::stoul(addrVal, nullptr, 16);
+            } else if (addrVal.find("0b") == 0) {
+              startAddr = std::stoul(addrVal, nullptr, 2);
+            } else // use dec
+            {
+              startAddr = std::stoul(addrVal, nullptr, 10);
+            }
+
+            std::string bankVal = asStr.substr(asStr.find(",num_banks=") +
+                                               sizeof(",num_banks=") - 1);
+            int banks = 0;
+
+            if (bankVal.find("0x") == 0) {
+              banks = std::stoul(bankVal, nullptr, 16);
+            } else if (bankVal.find("0b") == 0) {
+              banks = std::stoul(bankVal, nullptr, 2);
+            } else // use dec
+            {
+              banks = std::stoul(bankVal, nullptr, 10);
+            }
+
+            memory_types.at(var).size = size;
+            memory_types.at(var).startAddr = startAddr;
+            memory_types.at(var).banks = banks;
+
+            size_str << ",size=" << size;
+            start_addr_str << ",start_address=" << startAddr;
+            num_banks << ",num_banks=" << banks;
+          }
+
+          fmt::format_to(buff, "{}MemType[{}{}{}{}]\n", var->name().str(),
+                         MemoryTypeToString(memory_types.at(var).mt),
+                         size_str.str(), start_addr_str.str(), num_banks.str());
         }
       }
     }
   }
 
-  if (input_memory_type == end_mem_type) {
-    std::cout << "What memory type should be used for the inputs?"
-                 " (host / spad)\n";
-
-    input_memory_type = GetMemoryTypeInput();
-    if (input_memory_type == end_mem_type) {
-      std::cerr << "Invalid memory type given for inputs\n";
-      exit(-1);
-    }
-    fmt::format_to(buff, "InputMemType[{}]\n",
-                   MemoryTypeToString(input_memory_type));
-  }
-  for (int i = 0; i < m_->state_num(); i++) {
-    ExprPtr var = m_->state(i);
+  for (auto& varr : absknob::GetSttTree(m_)) {
+    ExprPtr var = varr;
     {
       if (var->is_mem()) {
         if (memory_types.find(var) == memory_types.end() ||
-            memory_types.at(var) == end_mem_type) {
+            memory_types.at(var).mt == end_mem_type) {
           std::cout << "What memory type should be used for state \""
                     << var->name().str() << "\" (host / spad)\n";
-          memory_types.insert({var, GetMemoryTypeInput()});
+          memory_types.insert({var, {GetMemoryTypeInput(), 0, 0, 0}});
 
           if (memory_types.find(var) != memory_types.end() &&
-              memory_types.at(var) == end_mem_type) {
+              memory_types.at(var).mt == end_mem_type) {
             std::cerr << "Invalid memory type given for state \""
                       << var->name().str() << "\"\n";
             exit(-1);
           }
-          fmt::format_to(buff, "{}MemType[{}]\n", var->name().str(),
-                         MemoryTypeToString(memory_types.at(var)));
+
+          std::stringstream size_str;
+          size_str << "";
+          std::stringstream start_addr_str;
+          start_addr_str << "";
+          std::stringstream num_banks;
+          start_addr_str << "";
+
+          if (memory_types.at(var).mt == spad) {
+            std::cout << "What size should be used for scratchpad: \""
+                      << var->name().str() << "\"\n";
+            memory_types.at(var).size = GetIntegerInput();
+            std::cout
+                << "What starting address should be used for scratchpad: \""
+                << var->name().str() << "\"\n";
+            memory_types.at(var).startAddr = GetIntegerInput();
+            std::cout << "How many banks are in scratchpad: \""
+                      << var->name().str() << "\"\n";
+            memory_types.at(var).banks = GetIntegerInput();
+
+            size_str << ",size=" << memory_types.at(var).size;
+            start_addr_str << ",start_address="
+                           << memory_types.at(var).startAddr;
+            num_banks << ",num_banks=" << memory_types.at(var).banks;
+          }
+
+          fmt::format_to(buff, "{}MemType[{}{}{}{}]\n", var->name().str(),
+                         MemoryTypeToString(memory_types.at(var).mt),
+                         size_str.str(), start_addr_str.str(), num_banks.str());
         }
       }
     }
@@ -403,10 +482,12 @@ bool Aladdin_Ilator::MemHelper(StrBuff& b, ExprVarMap& l, ExprPtr& old,
           auto pos = lut_ref.find(expr);
           ILA_ASSERT(pos != lut_ref.end());
           std::string local_var = pos->second;
-          fmt::format_to(buff,
-                         "{mem_name}[{local_var}_addr] = {local_var}_data;\n",
-                         fmt::arg("mem_name", GetCName(root)),
-                         fmt::arg("local_var", local_var));
+          fmt::format_to(
+              buff,
+              "{mem_name}[(unsigned _BitInt({bitwidth})){local_var}_addr] = {local_var}_data;\n",
+              fmt::arg("mem_name", GetCName(root)),
+              fmt::arg("local_var", local_var),
+              fmt::arg("bitwidth", MemSizeToAddressBits(host->memory_types.at(root).size, GetWordSize(root))));
         }
 
       } else if (expr->is_mem() && expr->is_const()) {
@@ -456,7 +537,7 @@ bool Aladdin_Ilator::MemHelper(StrBuff& b, ExprVarMap& l, ExprPtr& old,
   auto RenderMemUpdate = [this](const ExprPtr& e, StrBuff& b, ExprVarMap& l,
                                 ExprPtr& r) {
     bool d = memory_types.find(r) != memory_types.end() &&
-             memory_types.at(r) == host;
+             memory_types.at(r).mt == host;
 
     auto mem_visiter = MemUpdateVisiter(this, b, l, r, d);
     e->DepthFirstVisitPrePost(mem_visiter);
@@ -782,30 +863,38 @@ bool Aladdin_Ilator::GenerateSim(const std::string& dir) {
   fmt::format_to(buff, "\n  );\n}}\n");
 
   fmt::format_to(buff, "\nbool valid_decode_sim_parallel(");
-  AddParametersToBuffer(buff, true, ",\n  ");
-  fmt::format_to(buff, ")");
-  fmt::format_to(buff, "{{\n");
-  fmt::format_to(buff, "{}", fmt::to_string(validAndDecodeFunc));
+
+  StrBuff vdsBuff;
+
+  AddParametersToBuffer(vdsBuff, true, ",\n  ");
+  fmt::format_to(vdsBuff, ")");
+  fmt::format_to(vdsBuff, "{{\n");
+  fmt::format_to(vdsBuff, "{}", fmt::to_string(validAndDecodeFunc));
   first = true;
-  fmt::format_to(buff, "  return(\n");
+  fmt::format_to(vdsBuff, "  return(\n");
   for (int i = 0; i < valNum; i++) {
     if (!first) {
-      fmt::format_to(buff, "^\n");
+      fmt::format_to(vdsBuff, "^\n");
     } else {
       first = false;
     }
-    fmt::format_to(buff, "  valid{num}", fmt::arg("num", i));
+    fmt::format_to(vdsBuff, "  valid{num}", fmt::arg("num", i));
   }
   for (int i = 0; i < decNum; i++) {
     if (!first) {
-      fmt::format_to(buff, "^\n");
+      fmt::format_to(vdsBuff, "^\n");
     } else {
       first = false;
     }
-    fmt::format_to(buff, "  decode{num}", fmt::arg("num", i));
+    fmt::format_to(vdsBuff, "  decode{num}", fmt::arg("num", i));
   }
+  fmt::format_to(vdsBuff, "\n  );\n}}\n");
 
-  fmt::format_to(buff, "\n  );\n}}\n");
+  fmt::format_to(buff, "{}", to_string(vdsBuff));
+
+
+  fmt::format_to(buff, "\nbool valid_decode_sim_parallel_leakage(");
+  fmt::format_to(buff, "{}", to_string(vdsBuff));
 
   fmt::format_to(buff, "\nvoid get_base_leakage()\n"
                        "{{\n"
@@ -829,6 +918,7 @@ bool Aladdin_Ilator::GenerateSim(const std::string& dir) {
   AddParametersToBuffer(buff, true, ",\n  ");
   fmt::format_to(buff, ")");
   fmt::format_to(buff, "{{\n");
+  fmt::format_to(buff,"  bool retVal = valid_decode_sim_parallel_leakage(ARGSLIST);\n\n");
   auto UpdInstrSeq = [this, &buff](const InstrPtr& instr, bool child, int num) {
     fmt::format_to(
         buff, "  {seq_update_func_name}(ARGSLIST);\n\n",
@@ -837,6 +927,7 @@ bool Aladdin_Ilator::GenerateSim(const std::string& dir) {
   for (auto& instr : all_instrs) {
     UpdInstrSeq(instr, false, decNum);
   }
+  fmt::format_to(buff, "\n  return retVal;\n");
   fmt::format_to(buff, "\n}}\n");
 
   fmt::format_to(buff, "\nvoid sim(");
@@ -940,7 +1031,7 @@ bool Aladdin_Ilator::GenerateSim(const std::string& dir) {
 
   StrBuff mappingArrays;
   for (auto s : memory_types) {
-    if (s.second != MemoryType::spad) {
+    if (s.second.mt != MemoryType::spad) {
       uint64_t num_bytes = GetNumBytes(s.first);
       fmt::format_to(
           mappingArrays,
@@ -1087,12 +1178,16 @@ void Aladdin_Ilator::AddConfigLineToBuff(const ilang::ExprPtr& var,
       return;
     }
 
-    switch (memory_types.at(var)) {
+    switch (memory_types.at(var).mt) {
     case spad:
-      fmt::format_to(buff, "partition,cyclic,{var},{num_bytes},{word_size},1\n",
-                     fmt::arg("var", GetCName(var)),
-                     fmt::arg("num_bytes", GetNumBytes(var)),
-                     fmt::arg("word_size", GetWordSize(var)));
+      fmt::format_to(
+          buff, "partition,cyclic,{var},{num_bytes},{word_size},{num_banks}\n",
+          fmt::arg("var", GetCName(var)),
+          fmt::arg("num_bytes", memory_types.at(var).size),
+          fmt::arg("word_size", GetWordSize(var)),
+          fmt::arg("num_banks", memory_types.at(var).banks));
+      break;
+    default:
       break;
     }
   }
@@ -1469,6 +1564,14 @@ uint64_t Aladdin_Ilator::GetNumBytes(const ExprPtr& expr) {
   // problems
   return (((uint64_t)1 << ((uint64_t)sort->addr_width())) * GetWordSize(expr));
 }
+
+uint64_t Aladdin_Ilator::MemSizeToAddressBits(uint64_t memSize, int wordSize)
+{
+  uint64_t pOf2 = std::__bit_floor(memSize);
+  uint64_t wPOf2 = std::__bit_ceil(wordSize);
+  return __builtin_ffsll(pOf2) - 1 - __builtin_ffsll(wPOf2) - 1;
+}
+
 
 std::string Aladdin_Ilator::GetValidFuncName(const InstrLvlAbsCnstPtr& m) {
   return fmt::format("valid_{host}", fmt::arg("host", m->name().str()));
