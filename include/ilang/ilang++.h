@@ -648,6 +648,14 @@ void ExportSysCSim(const Ila& ila, const std::string& dir_path,
 void ExportAladdinSim(const Ila& ila, const std::string& dir_path,
                    bool optimize = false);
 
+
+/******************************************************************************/
+// Analysis
+/******************************************************************************/
+/// \brief Generate PPA Analysis for the ILA
+/// \param [in] ila the top-level ILA to analyze
+void AnalyzeIlaPPA(const Ila& ila);
+
 /******************************************************************************/
 // Verification.
 /******************************************************************************/
