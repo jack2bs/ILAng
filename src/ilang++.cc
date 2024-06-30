@@ -8,6 +8,7 @@
 #include <ilang/ila-mngr/u_abs_knob.h>
 #include <ilang/ila-mngr/u_unroller.h>
 #include <ilang/ila/instr_lvl_abs.h>
+#include <ilang/ppa-estimations/ppa.h>
 #include <ilang/target-itsy/interface.h>
 #include <ilang/target-json/interface.h>
 #include <ilang/target-sc/ilator.h>
@@ -761,14 +762,18 @@ void ImportChildSynthAbstraction(const std::string& file_name, Ila& parent,
 }
 #endif // SYNTH_INTERFACE
 
-void ExportSysCSim(const Ila& ila, const std::string& dir_path, bool opt) {
+void ExportSysCSim(const Ila& ila, const std::string& dir_path, bool opt, bool pwr) {
   auto ilator = Ilator(ila.get());
-  ilator.Generate(dir_path, opt);
+  ilator.Generate(dir_path, opt, pwr);
 }
 
 void ExportAladdinSim(const Ila& ila, const std::string& dir_path, bool opt) {
   auto ilator = Aladdin_Ilator(ila.get());
   ilator.Generate(dir_path, opt);
+}
+
+void AnalyzeIlaPPA(const Ila& ila) {
+  PPAAnalyzer analyzer(ila.get(), 1000.0);
 }
 
 IlaZ3Unroller::IlaZ3Unroller(z3::context& ctx, const std::string& suff)

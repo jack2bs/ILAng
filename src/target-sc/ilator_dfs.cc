@@ -11,6 +11,9 @@
 namespace ilang {
 
 void Ilator::DfsExpr(const ExprPtr& e, StrBuff& buff, ExprVarMap& lut) {
+
+  // put in the buff that we need to print the value
+
   if (auto pos = lut.find(e); pos == lut.end()) {
     if (e->is_var()) {
       DfsVar(e, buff, lut);
@@ -19,6 +22,37 @@ void Ilator::DfsExpr(const ExprPtr& e, StrBuff& buff, ExprVarMap& lut) {
     } else {
       ILA_ASSERT(e->is_op());
       DfsOp(e, buff, lut);
+    }
+  
+
+    if (this->vcd && !(e->is_mem()))
+    {
+      // fmt::format_to(buff, "std::cout << {} << '\\t' << {} << '\\n';\n", e->name().id(), LookUp(e, lut));
+
+      if (inVcd.find(e) == inVcd.end())
+      {
+        std::string newId = GetNewVcdIdentifier();
+        inVcd[e] = newId;
+      }
+
+      fmt::format_to(vcdHeaderBuff, "  $var wire {} {} {} $end\n", 
+            e->is_bool() ? 1 : e->sort()->bit_width(),
+            inVcd[e],
+            e->name().str());
+
+      if (e->is_bool())
+      {
+        fmt::format_to(buff, "vcd_map[\"{id}\"] = ({var} ? \"1\" : \"0\");\n",
+            fmt::arg("var", LookUp(e, lut)), 
+            fmt::arg("id", inVcd[e]));
+      }
+      else
+      {
+        // fmt::format_to(buff, "{}.print();\n", LookUp(e, lut));
+        fmt::format_to(buff, "vcd_map[\"{id}\"] = ({var}.to_string(SC_BIN).c_str() + 1);\n",
+            fmt::arg("var", LookUp(e, lut)), 
+            fmt::arg("id", inVcd[e]));
+      }
     }
   }
   ILA_ASSERT((e->is_mem() && e->is_op()) || (lut.find(e) != lut.end()));

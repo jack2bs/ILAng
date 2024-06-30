@@ -5,6 +5,7 @@
 #define ILANG_TARGET_SC_ILATOR_H__
 
 #include <memory>
+#include <map>
 #include <string>
 
 #include <fmt/format.h>
@@ -30,7 +31,8 @@ public:
   /// \brief Generate the SystemC simulator.
   /// \param[in] dst the directory path for the generated simulator.
   /// \param[in] opt set true to enable optimization.
-  void Generate(const std::string& dst, bool opt);
+  /// \param[in] pwr set true to enable support for power logging from Aladdin.
+  void Generate(const std::string& dst, bool opt, bool pwr = 0);
 
 private:
   /// Internal type of the string buffer.
@@ -68,8 +70,18 @@ private:
   std::set<ExprPtr> const_mems_;
   /// Global variables other than state variables.
   std::set<ExprPtr> global_vars_;
+  /// Contains whether or not the pwr models were to be enabled
+  bool pwr = false;
+  /// Contains whether or not the vcd simulation should be made
+  bool vcd = true;
+  /// Contains the contents of the vcdHeader
+  StrBuff vcdHeaderBuff;
+  /// Contains a list of all of the expressions put into the vcd and their identifiers
+  std::map<ExprPtr, std::string> inVcd;
 
   // ------------------------- HELPERS -------------------------------------- //
+  /// Pick an identifier for an ExprPtr
+  std::string GetNewVcdIdentifier();
   /// Reset all internal trackers.
   void Reset();
   /// Check if the ILA model contains unsupported patterns.
@@ -87,6 +99,8 @@ private:
   bool GenerateConstantMemory(const std::string& dir);
   /// Generate setup function for initial condition.
   bool GenerateInitialSetup(const std::string& dir);
+  /// Generate the power parser file
+  bool GeneratePowerParser(const std::string& dir);
   /// Generate the instruction scheduler and driver.
   bool GenerateExecuteKernel(const std::string& dir);
   /// Generate the shared header files.
@@ -113,6 +127,8 @@ private:
   /// Translation routine for regular operation.
   void DfsOpRegular(const ExprPtr& expr, StrBuff& buff, ExprVarMap& lut) const;
 
+
+  
   /// Request a function with the specified name and return var.
   CxxFunc* RegisterFunction(const std::string& func_name,
                             ExprPtr return_expr = nullptr);

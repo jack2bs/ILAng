@@ -637,8 +637,9 @@ void ImportChildSynthAbstraction(const std::string& file_name, Ila& parent,
 /// \param [in] ila the top-level ILA to generate.
 /// \param [in] dir_path directory path of the generated simulator.
 /// \param [in] optimize set true to enable optimization.
+/// \param [in] pwr set true to enable support for including power models
 void ExportSysCSim(const Ila& ila, const std::string& dir_path,
-                   bool optimize = false);
+                   bool optimize = false, bool pwr = false);
 
 /// \brief Generate the Aladdin simulator.
 /// \param [in] ila the top-level ILA to generate.
@@ -646,6 +647,14 @@ void ExportSysCSim(const Ila& ila, const std::string& dir_path,
 /// \param [in] optimize set true to enable optimization.
 void ExportAladdinSim(const Ila& ila, const std::string& dir_path,
                    bool optimize = false);
+
+
+/******************************************************************************/
+// Analysis
+/******************************************************************************/
+/// \brief Generate PPA Analysis for the ILA
+/// \param [in] ila the top-level ILA to analyze
+void AnalyzeIlaPPA(const Ila& ila);
 
 /******************************************************************************/
 // Verification.

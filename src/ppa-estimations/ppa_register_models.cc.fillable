@@ -1,0 +1,26 @@
+#include <ilang/ppa-estimations/ppa_model_registrar.h>
+
+
+namespace ilang 
+{
+
+/* After filling this out, rename the file, add it to CMakeLists.txt
+ * and then remove ppa_register_models.cc from the CMakeLists.txt*/
+
+void registerAllModels(PPA_Registrar & registrar)
+{
+
+    /* Create all of your PPAProfiles here */
+
+    /* Register all of them using registrar.registerProfile*/
+    for (/* all of the profiles you've created */) 
+    {
+        registrar.registerProfile(/* newprofile */);
+    }
+
+    /* Call this after registering all of your profiles */
+    registrar.finalizeRegistrar();
+}
+
+
+}
