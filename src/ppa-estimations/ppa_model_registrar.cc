@@ -31,7 +31,7 @@ PPA_Registrar::PPA_Registrar()
 
 void PPA_Registrar::registerProfile
 (
-    PPAProfile_ptr newProfile,
+    const PPAProfile_ptr & newProfile,
     HardwareBlock_t opType
 )
 {
@@ -42,7 +42,7 @@ void PPA_Registrar::registerProfile
 
 /*****************************************************************************/
 
-bool sortComparator(PPAProfile_ptr profA, PPAProfile_ptr profB)
+bool sortComparator(const PPAProfile_ptr & profA, const PPAProfile_ptr & profB)
 {
     return profA->getMaximumBitwidth() > profB->getMaximumBitwidth();
 }
@@ -69,7 +69,7 @@ PPAProfile_ptr PPA_Registrar::getMatchingProfile_LowestBitwidth
 {
     // for lists of the size we expect here, linear search will be faster
     // than binary search
-    for (PPAProfile_ptr prof : m_registeredProfiles.at(opType))
+    for (PPAProfile_ptr & prof : m_registeredProfiles.at(opType))
     {
         if (prof->getMaximumBitwidth() >= bitwidth)
         {

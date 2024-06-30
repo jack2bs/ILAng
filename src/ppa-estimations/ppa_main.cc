@@ -5,19 +5,27 @@
 #include "ilang/ila/ast/expr.h"
 #include "ilang/ila/ast/expr_op.h"
 #include "ilang/ila/ast_hub.h"
+#include <cstddef>
 #include <ilang/ppa-estimations/ppa.h>
 #include <memory>
+#include <unordered_map>
 
 #include "ilang/ppa-estimations/ppa_callbacks.h"
+#include "ilang/ppa-estimations/ppa_hardware_block.h"
 
 /// \namespace ilang
 namespace ilang {
+
+
+// This function needs a refactor to remove all of the duplicate code.
+// It's super doable just not worth doing yet since it won't actually come
+// with a performance improvement, just a sloc one.
 
 double PPAAnalyzer::PerformanceSearchByOperation
 (
     const ExprPtr & expr,
     double maximumArgReadyTime,
-    PPAAnalysisData ppaData
+    PPAAnalysisData & ppaData
 )
 {
     /* The methodology below is extra conservative for memory `if_then_else` */
@@ -41,13 +49,8 @@ double PPAAnalyzer::PerformanceSearchByOperation
         /* Use the mem use tracker associated with the 0th argument which for
          * both loads and stores is the memory state they use */
         
-        ILA_INFO << "HERE";
-        ILA_INFO << expr->arg(0)->name() << '\t' << expr->arg(0)->is_const()
-                 << '\t' << expr->arg(0)->is_mem() << (expr->arg(0)->is_op() ? asthub::GetUidExprOp(expr->arg(0)) : -1);
-        std::shared_ptr<std::vector<bool>> memUseTracker = 
+        std::shared_ptr<std::vector<bool>> & memUseTracker =
             ppaData.m_exprToMemUseByCycle.at(expr->arg(0));
-
-        ILA_INFO << "NOTHERE";
 
         // Convert `maximumArgReadyTime` from time to cycles
         size_t firstCycleReady = static_cast<size_t>
@@ -73,23 +76,47 @@ double PPAAnalyzer::PerformanceSearchByOperation
         memUseTracker->at(cycleToCheck) = true;
 
         // Check this later for off by 1 error (I don't think there's one)
-        double finishTime = ((cycleToCheck + 1)  * m_cycleTime);
-        return finishTime - maximumArgReadyTime;
+        double startTime = ((cycleToCheck)  * m_cycleTime);
+        return startTime;
     }
-    else
+    
+
+    HardwareBlock_t hbInd = UidToHardwareBlock(exprOp);
+    if (m_blockIsReused[hbInd])
     {
-        SortPtr srt = expr->sort();
-        int bitwidth = 
-            srt->is_bool() ? 1 :
-            srt->is_bv() ? srt->bit_width() :
-            /*srt->is_mem() ?*/ srt->data_width();
+        std::vector<int> & blockTracker = 
+            ppaData.m_hardwareBlocksPerCycle[hbInd];
 
-        PPA_Callbacks::s_m_bitwidth = bitwidth;
-        double time = m_registrar.getMatchingProfile_LowestBitwidth(
-            UidToHardwareBlock(exprOp), bitwidth)->getBlockTime();
+        int maxBlocksPerCycle = (*ppaData.m_maxOfEachBlock)[hbInd];
 
-        return time;
+        // Convert `maximumArgReadyTime` from time to cycles
+        size_t firstCycleReady = static_cast<size_t>
+            (maximumArgReadyTime / m_cycleTime);
+
+        while (firstCycleReady >= blockTracker.size())
+        {
+            blockTracker.push_back(0);
+        }
+
+        size_t cycleToCheck = firstCycleReady;
+        while (blockTracker.at(cycleToCheck) >= maxBlocksPerCycle)
+        {
+            cycleToCheck++;
+
+            if (cycleToCheck >= blockTracker.size())
+            {
+                blockTracker.push_back(0);
+                break;
+            }
+        }
+        blockTracker.at(cycleToCheck)++;
+
+        double startTime = cycleToCheck * m_cycleTime;
+        return startTime;
     }
+
+    return maximumArgReadyTime;
+
 }
 
 /*****************************************************************************/
@@ -136,8 +163,6 @@ void PPAAnalyzer::PerformanceGet
         };
         m_ila->DepthFirstVisit(findState);
 
-        ILA_INFO << "UPDATING MEM EXPR";
-
         ILA_ASSERT(ppaData.m_exprToMemUseByCycle.count(exprToUpdatePtr))
             << "Update to memory not in m_exprToMemUseByCycle";
 
@@ -166,6 +191,11 @@ void PPAAnalyzer::PerformanceGet
     auto determineTiming =
     [&ppaData, this](const ExprPtr & e)
     {
+        if (ppaData.m_endTimes.find(e) != ppaData.m_endTimes.end())
+        {
+            return;
+        }
+
         /* If e is a load operation, then we need to make sure that it is
          * mapped to the correct vector for tracking memory usage for the state
          * e loads from */
@@ -181,6 +211,7 @@ void PPAAnalyzer::PerformanceGet
                 {e, exprMemoryUsage}
             );
         }
+
         /* Methodology: Find time at which all args are ready, and how long the
          * operation will take. It's finish time is the sum of these two times
          */
@@ -196,16 +227,28 @@ void PPAAnalyzer::PerformanceGet
             }
         }
 
-        ppaData.m_startTimes.insert({e, maximumArgReadyTime});
+        ppaData.m_readyTimes.insert({e, maximumArgReadyTime});
 
-        double eReadyTime = 0.0;
+
+        double eProvisionalFinishTime = 0.0;
         double opPerformance = 0.0;
         if (e->is_op())
         {
-            opPerformance = PerformanceSearchByOperation(
-                e, maximumArgReadyTime, ppaData
-            );
-            eReadyTime = maximumArgReadyTime + opPerformance;
+            SortPtr srt = e->sort();
+            int bitwidth = 
+                srt->is_bool() ? 1 :
+                srt->is_bv() ? srt->bit_width() :
+                /*srt->is_mem() ?*/ srt->data_width();
+
+            PPA_Callbacks::s_m_bitwidth = bitwidth;
+
+            // TODO : I don't love the way this deals with memory, think ab it.
+            double opPerformance = e->is_mem() ? m_cycleTime :
+                m_registrar.getMatchingProfile_LowestBitwidth(
+                UidToHardwareBlock(asthub::GetUidExprOp(e)),
+                bitwidth)->getBlockTime();
+
+            eProvisionalFinishTime = maximumArgReadyTime + opPerformance;
         }
         else
         {
@@ -224,7 +267,7 @@ void PPAAnalyzer::PerformanceGet
             ILA_WARN_IF(maximumArgReadyTime > 0.001) 
                 << "Non op found with start time after 0.0";
 
-            eReadyTime = maximumArgReadyTime;
+            eProvisionalFinishTime = maximumArgReadyTime;
 
         }
 
@@ -232,8 +275,8 @@ void PPAAnalyzer::PerformanceGet
         /* If it is configured not to pipeline short operations, then we need
          * to wait until the start of the next cycle to start the operation */
         double startCycleUncasted = (maximumArgReadyTime / m_cycleTime);
-        int startCycle = static_cast<int>(maximumArgReadyTime / m_cycleTime);
-        int endCycle = static_cast<int>(eReadyTime / m_cycleTime);
+        int startCycle = static_cast<int>(startCycleUncasted);
+        int endCycle = static_cast<int>(eProvisionalFinishTime / m_cycleTime);
 
         bool spansCycles = startCycle != endCycle;
 
@@ -245,18 +288,29 @@ void PPAAnalyzer::PerformanceGet
 
         bool longOpRetime = m_configuration.pipelineStartAtCycleBoundary;
 
+        double provisionalStartTime = maximumArgReadyTime;
         if ((longOpRetime || shortOpRetime) && spansCycles)
         {
             /* This gets the next cycle except for the case where we are 
              * exactly or almost exactly on a cycle boundary */
-            double newStartTime = ceil(startCycleUncasted - 0.000001);
-            eReadyTime = ((newStartTime) * m_cycleTime) + opPerformance;
+            provisionalStartTime = ceil(startCycleUncasted - 0.000001) 
+                * m_cycleTime;
         }
 
         // USEFUL DEBUG DON'T DELETE JACK!
-        // ILA_INFO << "Start: " << maximumArgReadyTime << " optime: " << opPerformance << " end: " << eReadyTime;
+        // ILA_INFO << "Start: " << maximumArgReadyTime << " optime: " << opPerformance << " end: " << eProvisionalFinishTime;
 
-        ppaData.m_endTimes.insert({e, eReadyTime});
+        double startTime = e->is_op()
+            ? PerformanceSearchByOperation(e, provisionalStartTime, ppaData) 
+            : maximumArgReadyTime;
+
+        ppaData.m_startTimes.insert({e, startTime});
+
+        double eFinishTime = startTime + opPerformance;
+        
+        ppaData.m_endTimes.insert({e, eFinishTime});
+
+        ILA_ASSERT(eFinishTime - startTime > -0.001) << "finish pre start";
 
     };
 
@@ -280,10 +334,23 @@ void PPAAnalyzer::AnalysisDataInitialize(PPAAnalysisData & ppaData)
     static bool isInit = false;
     static PPAAnalysisData emptyPpaData = {};
 
+    static std::vector<ExprPtr> memVars;
+
     if (isInit)
     {
-        // TODO: Will need to check that this works as intended!
-        ppaData = emptyPpaData;
+        auto end = memVars.end();
+        for (const ExprPtr & var : memVars)
+        {
+            std::shared_ptr<std::vector<bool>> newVec =
+                std::make_shared<std::vector<bool>>();
+
+            ppaData.m_exprToMemUseByCycle.insert({var, newVec});
+        }
+
+        // TODO: Later, make this based on whether a specific config was 
+        // supplied
+        ppaData.m_maxOfEachBlock = &m_defaultBlockReuseMax;
+
         return;
     }
 
@@ -291,16 +358,15 @@ void PPAAnalyzer::AnalysisDataInitialize(PPAAnalysisData & ppaData)
     {
         if (var->is_mem())
         {
-            std::shared_ptr<std::vector<bool>> newVec =
-                std::make_shared<std::vector<bool>>();
-            ppaData.m_exprToMemUseByCycle.insert({var, newVec});
-            emptyPpaData.m_exprToMemUseByCycle.insert({var, newVec});
+            memVars.push_back(var);
+
             ILA_INFO << "Found mem state, " << var->name().str() 
-                << " added vector to ppaData at addr " << newVec;
+                << " added vector to list of memVars";
         }
     }
 
     isInit = true;
+    AnalysisDataInitialize(ppaData);
 }
 
 
@@ -310,8 +376,8 @@ void PPAAnalyzer::AnalysisDataInitialize(PPAAnalysisData & ppaData)
 void PPAAnalyzer::AnalysisDataDelete(PPAAnalysisData & ppaData)
 {
     ppaData.m_exprToMemUseByCycle.clear();
-    ppaData.m_hardwareBlocksPerCycle.clear();
     ppaData.m_endTimes.clear();
+    ppaData.m_readyTimes.clear();
     ppaData.m_startTimes.clear();
     ppaData.m_latestTime = 0.0;
 }
@@ -377,34 +443,24 @@ void PPAAnalyzer::ExtractHardwareBlocks(PPAAnalysisData & ppaData)
      * m_endTimes, we can determine what hardware blocks are in use during
      * what cycles. */
 
-    int numCycles = static_cast<int>(ceil(ppaData.m_latestTime + 0.00000001
+
+    int numCycles = static_cast<int>(ceil((ppaData.m_latestTime + 0.00000001)
         / m_cycleTime));
 
-    ppaData.m_hardwareBlocksPerCycle.resize(numCycles);
-    for (size_t i = 0; i < numCycles; i++)
+
+
+    for (std::vector<int> & vec : ppaData.m_hardwareBlocksPerCycle)
     {
-        for (int j = 0; j < m_countBlockTypes; j++)
-        {
-            ppaData.m_hardwareBlocksPerCycle.at(i)[j] = 0;
-        }
+        vec.clear();
+        vec.resize(numCycles, 0);
     }
     
-    for (auto pair : ppaData.m_endTimes)
+    for (auto & pair : ppaData.m_endTimes)
     {
 
         int count = 0;
-        for (auto pair2 : ppaData.m_endTimes)
-        {
-            if (pair2.first == pair.first)
-            {
-                count++;
-            }
 
-            ILA_ASSERT(count <= 1) << "There are duplicates";
-
-        }
-
-        ExprPtr expr = pair.first;
+        const ExprPtr & expr = pair.first;
         double endTime = pair.second;
 
         if (!expr->is_op())
@@ -417,21 +473,143 @@ void PPAAnalyzer::ExtractHardwareBlocks(PPAAnalysisData & ppaData)
 
         double startTime = ppaData.m_startTimes.at(expr);
 
-        int startCycle = static_cast<int>(startTime / m_cycleTime);
 
-        ppaData.m_hardwareBlocksPerCycle.at(startCycle)[exprHwBlock]++;
+
+        int startCycle = static_cast<int>(startTime / m_cycleTime);
+        ppaData.m_hardwareBlocksPerCycle[exprHwBlock].at(startCycle)++;
     
     }
 
-    // for (size_t i = 0; i < numCycles; i++)
-    // {
-    //     for (int j = 0; j < m_countBlockTypes; j++)
-    //     {
-    //         std::cout << ' ' << ppaData.m_hardwareBlocksPerCycle.at(i)[j];
-    //     }
-    //     std::cout << '\n';
-    // }
 
+    for (size_t i = 0; i < numCycles; i++)
+    {
+        for (int j = 0; j < m_countBlockTypes; j++)
+        {
+            std::cout << ' ' << ppaData.m_hardwareBlocksPerCycle[j].at(i);
+        }
+        std::cout << '\n';
+    }
+    std::cout << '\n' << '\n';
+
+}
+
+/*****************************************************************************/
+
+const ExprPtr * findDuplicates
+(
+    const ExprPtr & e,
+    std::unordered_map<uint64_t, const ExprPtr> & set
+)
+{
+    if (e->is_var())
+    {
+        return 0;
+    }
+
+
+    size_t key = 0;
+    if (e->is_op())
+    {
+        for (int i = 0; i < e->arg_num(); i++)
+        {
+            key |= (e->arg(i)->name().id() & 0x7ffffUL) << (i * 19);
+        }
+        key |= (asthub::GetUidExprOp(e) & 0x3fUL) << 57UL;
+    }
+    else if (e->is_const())
+    {
+        ExprConst & eConst = dynamic_cast<ExprConst&>(*e);
+        if (eConst.is_bool())
+        {
+            key = eConst.val_bool()->val() | (1UL << 62);
+        }
+        else if (eConst.is_bv())
+        {
+            key = (eConst.val_bv()->val() << 1) | (1UL << 63);
+        }
+        else // eConst is mem and we don't expect duplicate constant mems
+        {
+            return 0;
+        }
+    }
+
+    while (true)
+    {
+        auto found = set.find(key);
+        if (found == set.end())
+        {
+            // This path is followed the vast majority of the time
+            set.insert({key, e});
+            return nullptr;
+        }
+
+        const ExprPtr & match = found->second;
+        if (match->is_op() && e->is_op())
+        {
+            /* If the hashes matched and they're both ops, then the ops match
+            * as dedicate enough bits to guarantee it. Hence, their arities
+            * are equal */
+            
+
+            ILA_ASSERT(e->arg_num() == match->arg_num()) << "Arg nums don't match";
+            int args = e->arg_num();
+            bool theyMatch = true;
+            for (int i = 0; i < args; i++)
+            {
+                theyMatch &=
+                    (e->arg(i)->name().id() == match->arg(i)->name().id());
+            }
+            if (theyMatch)
+            {
+                return &match;
+            }
+        
+        }
+        if (match->is_const() && e->is_const())
+        {
+            ExprConst & matchConst = dynamic_cast<ExprConst&>(*match);
+            ExprConst & eConst = dynamic_cast<ExprConst&>(*e);
+
+            if (matchConst.is_bool() && eConst.is_bool())
+            {
+                return &match;
+            }
+            else if (matchConst.is_bv() && eConst.is_bv() 
+                && matchConst.val_bv()->val() == eConst.val_bv()->val())
+            {
+                return &match;
+            }
+        }
+        /* If there was a collision (incorrect match), just increment the
+         * key and try again */ 
+        static long collisionCount = 0;
+        collisionCount++;
+        ILA_INFO << "Duplicate search found collision, #" << collisionCount;
+        key++;
+    }
+    // Unreachable
+    ILA_ASSERT(false) << "Reached supposedly unreachable code in findDuplicates";
+}
+
+/*****************************************************************************/
+
+const ExprPtr * PPAAnalyzer::RemoveDuplicates
+(
+    const ExprPtr & topExpr,
+    std::unordered_map<uint64_t, const ExprPtr> & set
+)
+{
+    for (int i = 0; i < topExpr->arg_num(); i++)
+    {
+        const ExprPtr & arg = topExpr->arg(i);
+        const ExprPtr * newId = RemoveDuplicates(arg, set);
+        if (newId)
+        {
+            // ILA_INFO << "Found duplicate! :)";
+            topExpr->replace_arg(i, *newId);
+        }
+    }
+    return findDuplicates(topExpr, set);
 }
 
 /*****************************************************************************/
@@ -443,24 +621,30 @@ void PPAAnalyzer::PPAAnalyze()
 
     std::vector<PPAAnalysisData_ptr> ppaData {};
 
-
-    for (InstrPtr instr : absknob::GetInstrTree(m_ila))
+    for (InstrPtr & instr : absknob::GetInstrTree(m_ila))
     {
         ILA_INFO << "Beginning instruction : " << instr->name().c_str();
 
-        PPAAnalysisData_ptr ppaDataTest = std::make_shared<PPAAnalysisData>();
+        ppaData.emplace_back(std::make_unique<PPAAnalysisData>());
+        PPAAnalysisData_ptr & ppaDataTest = ppaData.back();
+
         AnalysisDataInitialize(*ppaDataTest);
-        ppaData.emplace_back(ppaDataTest);
-        
+
+        std::unordered_map<uint64_t, const ExprPtr> set;
+
         Instr::StateNameSet updated_states = instr->updated_states();
         for (const std::string& s : updated_states) {
-            ExprPtr update_expr = instr->update(s);
+            const ExprPtr & update_expr = instr->update(s);
+
+            RemoveDuplicates(update_expr, set);
+
             PerformanceGet(update_expr, *ppaDataTest, s);
         }
+        std::cout << instr->name() << '\n';
         ExtractHardwareBlocks(*ppaDataTest);
     }
 
-    for (PPAAnalysisData_ptr ppaDataTest : ppaData)
+    for (PPAAnalysisData_ptr & ppaDataTest : ppaData)
     {
         AnalysisDataDelete(*ppaDataTest);
     }
@@ -473,7 +657,8 @@ void PPAAnalyzer::PPAAnalyze()
 /*****************************************************************************/
 
 PPAAnalyzer::PPAAnalyzer(const InstrLvlAbsPtr & ila, double cycle_time)
-    : m_ila(ila), m_cycleTime(cycle_time), m_blockReuseConfig{}
+    : m_ila(ila), m_cycleTime(cycle_time), 
+      m_blockIsReused{}, m_defaultBlockReuseMax {}
 {
 
     m_configuration = {
@@ -483,22 +668,35 @@ PPAAnalyzer::PPAAnalyzer(const InstrLvlAbsPtr & ila, double cycle_time)
         .shortOperationLengthThreshold = 1.0,
 
         .reuseShifterBlocks = false,
-        .reuseAdditionBlocks = false,
+        .reuseAdditionBlocks = true,
         .reuseMultiplyBlocks = true,
         .reuseDivideBlocks = true,
-        .reuseRemainderBlocks = true
+        .reuseRemainderBlocks = true,
+
+        .maximumShifterBlocks = 2,
+        .maximumAdditionBlocks = 2,
+        .maximumMultiplyBlocks = 2,
+        .maximumDivideBlocks = 2,
+        .maximumRemainderBlocks = 2
     };
 
     ILA_WARN_IF(m_configuration.pipelineStartAtCycleBoundary 
         && m_configuration.pipelineShortOperations) 
         << "Setting pipelineShortOperations while pipelineStartAtCycleBoundary is set will have no effect";
 
-    m_blockReuseConfig[bShifter] = m_configuration.reuseShifterBlocks;
-    m_blockReuseConfig[bAddition] = m_configuration.reuseAdditionBlocks;
-    m_blockReuseConfig[bMultiplication] = m_configuration.reuseMultiplyBlocks;
-    m_blockReuseConfig[bDivision] = m_configuration.reuseDivideBlocks;
-    m_blockReuseConfig[bRemainder] = m_configuration.reuseRemainderBlocks;
-    ILA_ASSERT(m_blockReuseConfig[bMemory] == false)
+    m_blockIsReused[bShifter] = m_configuration.reuseShifterBlocks;
+    m_blockIsReused[bAddition] = m_configuration.reuseAdditionBlocks;
+    m_blockIsReused[bMultiplication] = m_configuration.reuseMultiplyBlocks;
+    m_blockIsReused[bDivision] = m_configuration.reuseDivideBlocks;
+    m_blockIsReused[bRemainder] = m_configuration.reuseRemainderBlocks;
+   
+    m_defaultBlockReuseMax[bShifter] = m_configuration.maximumShifterBlocks;
+    m_defaultBlockReuseMax[bAddition] = m_configuration.maximumAdditionBlocks;
+    m_defaultBlockReuseMax[bMultiplication] = m_configuration.maximumMultiplyBlocks;
+    m_defaultBlockReuseMax[bDivision] = m_configuration.maximumDivideBlocks;
+    m_defaultBlockReuseMax[bRemainder] = m_configuration.maximumRemainderBlocks;   
+    
+    ILA_ASSERT(m_blockIsReused[bMemory] == false)
         << "m_blockReuseConfig not init to 0s";
 
     if (m_configuration.shortOperationLengthThreshold > cycle_time)
@@ -522,15 +720,23 @@ PPAAnalyzer::PPAAnalyzer
     const InstrLvlAbsPtr & ila,
     double cycle_time,
     PPAAnalyzerConfig * config
-)   :m_ila(ila), m_cycleTime(cycle_time), m_configuration(*config)
+)   : m_ila(ila), m_cycleTime(cycle_time), m_configuration(*config),
+      m_blockIsReused{}, m_defaultBlockReuseMax {}
 {
 
-    m_blockReuseConfig[bShifter] = m_configuration.reuseShifterBlocks;
-    m_blockReuseConfig[bAddition] = m_configuration.reuseAdditionBlocks;
-    m_blockReuseConfig[bMultiplication] = m_configuration.reuseMultiplyBlocks;
-    m_blockReuseConfig[bDivision] = m_configuration.reuseDivideBlocks;
-    m_blockReuseConfig[bRemainder] = m_configuration.reuseRemainderBlocks;
-    ILA_ASSERT(m_blockReuseConfig[bMemory] == false) 
+    m_blockIsReused[bShifter] = m_configuration.reuseShifterBlocks;
+    m_blockIsReused[bAddition] = m_configuration.reuseAdditionBlocks;
+    m_blockIsReused[bMultiplication] = m_configuration.reuseMultiplyBlocks;
+    m_blockIsReused[bDivision] = m_configuration.reuseDivideBlocks;
+    m_blockIsReused[bRemainder] = m_configuration.reuseRemainderBlocks;
+   
+    m_defaultBlockReuseMax[bShifter] = m_configuration.maximumShifterBlocks;
+    m_defaultBlockReuseMax[bAddition] = m_configuration.maximumAdditionBlocks;
+    m_defaultBlockReuseMax[bMultiplication] = m_configuration.maximumMultiplyBlocks;
+    m_defaultBlockReuseMax[bDivision] = m_configuration.maximumDivideBlocks;
+    m_defaultBlockReuseMax[bRemainder] = m_configuration.maximumRemainderBlocks;  
+
+    ILA_ASSERT(m_blockIsReused[bMemory] == false) 
         << "m_blockReuseConfig not init to 0s";
 
 

@@ -1567,9 +1567,10 @@ uint64_t Aladdin_Ilator::GetNumBytes(const ExprPtr& expr) {
 
 uint64_t Aladdin_Ilator::MemSizeToAddressBits(uint64_t memSize, int wordSize)
 {
+  memSize = memSize / wordSize;
   uint64_t pOf2 = std::__bit_floor(memSize);
-  uint64_t wPOf2 = std::__bit_ceil(wordSize);
-  return __builtin_ffsll(pOf2) - 1 - __builtin_ffsll(wPOf2) - 1;
+  // uint64_t wPOf2 = std::__bit_ceil(wordSize);
+  return __builtin_ffsll(pOf2) - 1;
 }
 
 

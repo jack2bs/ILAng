@@ -23,7 +23,11 @@ public:
     /* Register newProfile as a usable PPA profile for opType operations for 
      * this accelerator. This essentially adds it to the vector of profiles
      * available for the opType*/
-    void registerProfile(PPAProfile_ptr newProfile, HardwareBlock_t opType);
+    void registerProfile
+    (
+        const PPAProfile_ptr & newProfile,
+        HardwareBlock_t opType
+    );
 
     /* Inform the program that the registrar has been finalized. The registrar 
      * must be finalized before other code is run. Profiles can still be added 

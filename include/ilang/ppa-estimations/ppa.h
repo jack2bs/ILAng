@@ -76,7 +76,7 @@ public:
 
 private:
 
-
+    typedef std::array<std::vector<int>, bNumBlockTypes> UseTracker_t;
     struct PPAAnalysisData
     {
         PPAAnalysisData() : m_latestTime(0) {};
@@ -86,6 +86,9 @@ private:
 
         // The time when each expression begins in the current analysis
         std::unordered_map<ExprPtr, double> m_startTimes;
+        
+        // The time when each expression is ready in the current analysis
+        std::unordered_map<ExprPtr, double> m_readyTimes;
 
         // Maps each memory expression to it's underlying memory partition's 
         // timing tracker 
@@ -95,10 +98,17 @@ private:
         // Tracks the largest value of any expression in the m_endTimes map
         double m_latestTime;
 
+        // Points to an array filled with the maximum number of each hw block
+        std::array<int, bNumBlockTypes> * m_maxOfEachBlock;
+
+        // Tracks how many of each block have been used each cycle to enforce
+        // configuration maximums
+        std::array<std::vector<int>, bNumBlockTypes> m_hardwareUseTracker;
+
         //
-        std::vector<std::array<int, bNumBlockTypes>> m_hardwareBlocksPerCycle;
+        std::array<std::vector<int>, bNumBlockTypes> m_hardwareBlocksPerCycle;
     };
-    typedef std::shared_ptr<PPAAnalysisData> PPAAnalysisData_ptr;
+    typedef std::unique_ptr<PPAAnalysisData> PPAAnalysisData_ptr;
 
     // struct HardwareBlockCounter
     // {
@@ -122,12 +132,13 @@ private:
 
     /* Returns the time between `expr`'s arguments being ready and it's 
      * execution being finished. `maximumArgReadyTime` is the earliest time at 
-     * which `expr` can start, and uses the structures in `ppa_time_dat` */
+     * which `expr` can start, and uses the structures in `ppa_time_dat`. Fills
+     * in start times */
     double PerformanceSearchByOperation
     (
         const ExprPtr & expr, 
         double maximumArgReadyTime,
-        PPAAnalysisData ppa_time_dat
+        PPAAnalysisData & ppa_time_dat
     );
 
     /* Initializes `ppa_time_dat` with tracking vectors for all memory states
@@ -137,6 +148,12 @@ private:
     /* Cleans up the tracking vectors in `ppa_time_dat` */
     void AnalysisDataDelete(PPAAnalysisData & ppa_time_dat);
 
+    /* Removes duplicates from the expressions according to the list */
+    const ExprPtr * RemoveDuplicates
+    (
+        const ExprPtr & topExpr, 
+        std::unordered_map<uint64_t, const ExprPtr> & set
+    );
 
 
     /* Returns the type of hardware block which implements operation `op` */
@@ -152,7 +169,8 @@ private:
     const double m_cycleTime;
     std::set<ExprPtr> m_constMems;
     PPAAnalyzerConfig m_configuration;
-    int m_blockReuseConfig[HardwareBlock_t::bNumBlockTypes]; 
+    std::array<bool,bNumBlockTypes> m_blockIsReused;
+    std::array<int,bNumBlockTypes> m_defaultBlockReuseMax;
     PPA_Registrar m_registrar;
     VCDFile * m_vcdStatistics;
 
