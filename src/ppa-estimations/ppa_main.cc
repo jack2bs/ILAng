@@ -21,7 +21,7 @@ namespace ilang {
 // It's super doable just not worth doing yet since it won't actually come
 // with a performance improvement, just a sloc one.
 
-double PPAAnalyzer::PerformanceSearchByOperation
+double PPAAnalyzer::ScheduleAndCount
 (
     const ExprPtr & expr,
     double maximumArgReadyTime,
@@ -33,7 +33,7 @@ double PPAAnalyzer::PerformanceSearchByOperation
     if (exprOp == kLoad || exprOp == kStore)
     {
         /* Methodology: Assume for now that each memory device can be written 
-         * to or read from within a single cycle, and that only 1 operation is 
+         * to or read from in one whole cycle, and that only 1 operation is 
          * permited per cycle. Track the memory usage as vectors of bools, 
          * stored in the PPAAnalysisData struct in `m_exprToMemUseByCycle`.
          * Then find and use the earliest available cycle after the operation
@@ -82,23 +82,41 @@ double PPAAnalyzer::PerformanceSearchByOperation
     
 
     HardwareBlock_t hbInd = UidToHardwareBlock(exprOp);
-    if (m_blockIsReused[hbInd])
+
+    const SortPtr & srt = expr->sort();
+    int bitwidth = 
+        srt->is_bool() ? 1 :
+        srt->is_bv() ? srt->bit_width() :
+        /*srt->is_mem() ?*/ srt->data_width();
+
+    const PPAProfile_ptr & prof = 
+        m_registrar.getMatchingProfile_LowestBitwidth(hbInd, bitwidth);
+
+    int profileIndex = prof->getGlobalIndex();
+
+    // std::vector<int> & blockTracker =
+    //     ppaData.m_hardwareBlocksPerCycle[profileIndex];
+
+    std::vector<int> & blockTracker = 
+        ppaData.m_hardwareUseTracker.at(profileIndex);
+
+    int maxBlocksPerCycle = prof->getMaximumInstances();
+
+    // Convert `maximumArgReadyTime` from time to cycles
+    size_t firstCycleReady = static_cast<size_t>
+        (maximumArgReadyTime / m_cycleTime);
+
+    while (firstCycleReady >= blockTracker.size())
     {
-        std::vector<int> & blockTracker = 
-            ppaData.m_hardwareBlocksPerCycle[hbInd];
+        blockTracker.push_back(0);
+    }
 
-        int maxBlocksPerCycle = (*ppaData.m_maxOfEachBlock)[hbInd];
+    size_t cycleToCheck = firstCycleReady;
 
-        // Convert `maximumArgReadyTime` from time to cycles
-        size_t firstCycleReady = static_cast<size_t>
-            (maximumArgReadyTime / m_cycleTime);
+    double startTime = maximumArgReadyTime;
 
-        while (firstCycleReady >= blockTracker.size())
-        {
-            blockTracker.push_back(0);
-        }
-
-        size_t cycleToCheck = firstCycleReady;
+    if (prof->getIsReusable())
+    {
         while (blockTracker.at(cycleToCheck) >= maxBlocksPerCycle)
         {
             cycleToCheck++;
@@ -109,14 +127,12 @@ double PPAAnalyzer::PerformanceSearchByOperation
                 break;
             }
         }
-        blockTracker.at(cycleToCheck)++;
-
-        double startTime = cycleToCheck * m_cycleTime;
-        return startTime;
     }
 
-    return maximumArgReadyTime;
+    blockTracker.at(cycleToCheck)++;
+    startTime = fmax(cycleToCheck * m_cycleTime, startTime);
 
+    return startTime;
 }
 
 /*****************************************************************************/
@@ -301,7 +317,7 @@ void PPAAnalyzer::PerformanceGet
         // ILA_INFO << "Start: " << maximumArgReadyTime << " optime: " << opPerformance << " end: " << eProvisionalFinishTime;
 
         double startTime = e->is_op()
-            ? PerformanceSearchByOperation(e, provisionalStartTime, ppaData) 
+            ? ScheduleAndCount(e, provisionalStartTime, ppaData) 
             : maximumArgReadyTime;
 
         ppaData.m_startTimes.insert({e, startTime});
@@ -347,9 +363,7 @@ void PPAAnalyzer::AnalysisDataInitialize(PPAAnalysisData & ppaData)
             ppaData.m_exprToMemUseByCycle.insert({var, newVec});
         }
 
-        // TODO: Later, make this based on whether a specific config was 
-        // supplied
-        ppaData.m_maxOfEachBlock = &m_defaultBlockReuseMax;
+        ppaData.m_hardwareUseTracker.resize(m_registrar.getSize());
 
         return;
     }
@@ -402,6 +416,7 @@ HardwareBlock_t PPAAnalyzer::UidToHardwareBlock(AstUidExprOp op)
     case kXor: 
     case kImply:
     case kIfThenElse:
+    case kEqual:
         return bBitwise;
     case kShiftLeft:
     case kArithShiftRight:
@@ -411,7 +426,6 @@ HardwareBlock_t PPAAnalyzer::UidToHardwareBlock(AstUidExprOp op)
         return bShifter;
     case kAdd:
     case kSubtract:
-    case kEqual:
     case kLessThan:
     case kGreaterThan:
     case kUnsignedLessThan:
@@ -437,61 +451,29 @@ HardwareBlock_t PPAAnalyzer::UidToHardwareBlock(AstUidExprOp op)
 
 /*****************************************************************************/
 
-void PPAAnalyzer::ExtractHardwareBlocks(PPAAnalysisData & ppaData)
+void PPAAnalyzer::PrintHardwareBlocks(PPAAnalysisData & ppaData)
 {
-    /* Methodology: using the ExprPtr's and the ready times in ppaData.
-     * m_endTimes, we can determine what hardware blocks are in use during
-     * what cycles. */
 
+    size_t numCycles = static_cast<size_t>(
+        ceil((ppaData.m_latestTime + 0.0000001) / m_cycleTime)
+    );
 
-    int numCycles = static_cast<int>(ceil((ppaData.m_latestTime + 0.00000001)
-        / m_cycleTime));
-
-
-
-    for (std::vector<int> & vec : ppaData.m_hardwareBlocksPerCycle)
-    {
-        vec.clear();
-        vec.resize(numCycles, 0);
-    }
-    
-    for (auto & pair : ppaData.m_endTimes)
-    {
-
-        int count = 0;
-
-        const ExprPtr & expr = pair.first;
-        double endTime = pair.second;
-
-        if (!expr->is_op())
-        {
-            continue;
-        }
-
-        AstUidExprOp exprOp = asthub::GetUidExprOp(expr);
-        HardwareBlock_t exprHwBlock = UidToHardwareBlock(exprOp);
-
-        double startTime = ppaData.m_startTimes.at(expr);
-
-
-
-        int startCycle = static_cast<int>(startTime / m_cycleTime);
-        ppaData.m_hardwareBlocksPerCycle[exprHwBlock].at(startCycle)++;
-    
-    }
-
+    size_t registrarSize = m_registrar.getSize();
 
     for (size_t i = 0; i < numCycles; i++)
     {
-        for (int j = 0; j < m_countBlockTypes; j++)
+        for (int j = 0; j < registrarSize; j++)
         {
-            std::cout << ' ' << ppaData.m_hardwareBlocksPerCycle[j].at(i);
+            int numToPrint = (ppaData.m_hardwareUseTracker.at(j).size() <= i) 
+                ? 0 : ppaData.m_hardwareUseTracker.at(j).at(i);
+
+            std::cout << ' ' << numToPrint;
         }
         std::cout << '\n';
     }
     std::cout << '\n' << '\n';
-
 }
+
 
 /*****************************************************************************/
 
@@ -621,6 +603,27 @@ void PPAAnalyzer::PPAAnalyze()
 
     std::vector<PPAAnalysisData_ptr> ppaData {};
 
+    {// for repeated naming purposes
+    
+    ILA_INFO << "Beginning decode";
+
+    ppaData.emplace_back(std::make_unique<PPAAnalysisData>());
+    PPAAnalysisData_ptr & ppaDataTest = ppaData.back();
+    AnalysisDataInitialize(*ppaDataTest);
+
+    std::unordered_map<uint64_t, const ExprPtr> set;
+
+    for (InstrPtr & instr : absknob::GetInstrTree(m_ila))
+    {
+        const ExprPtr & decode_expr = instr->decode();
+        RemoveDuplicates(decode_expr, set);
+        PerformanceGet(decode_expr, *ppaDataTest, "");
+    }
+    std::cout << "decode\n";
+    PrintHardwareBlocks(*ppaDataTest);
+
+    }
+
     for (InstrPtr & instr : absknob::GetInstrTree(m_ila))
     {
         ILA_INFO << "Beginning instruction : " << instr->name().c_str();
@@ -641,7 +644,10 @@ void PPAAnalyzer::PPAAnalyze()
             PerformanceGet(update_expr, *ppaDataTest, s);
         }
         std::cout << instr->name() << '\n';
-        ExtractHardwareBlocks(*ppaDataTest);
+
+        PrintHardwareBlocks(*ppaDataTest);
+
+        // ExtractHardwareBlocks(*ppaDataTest);
     }
 
     for (PPAAnalysisData_ptr & ppaDataTest : ppaData)
@@ -674,7 +680,7 @@ PPAAnalyzer::PPAAnalyzer(const InstrLvlAbsPtr & ila, double cycle_time)
         .reuseRemainderBlocks = true,
 
         .maximumShifterBlocks = 2,
-        .maximumAdditionBlocks = 2,
+        .maximumAdditionBlocks = 16,
         .maximumMultiplyBlocks = 2,
         .maximumDivideBlocks = 2,
         .maximumRemainderBlocks = 2

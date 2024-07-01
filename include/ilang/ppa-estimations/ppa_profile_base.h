@@ -21,6 +21,18 @@ public:
     virtual double getBlockArea() = 0;
     virtual int getMaximumBitwidth() = 0;
 
+    virtual int getMaximumInstances() = 0;
+    virtual bool getIsReusable() = 0;
+
+    // Should not be overriden
+    void setGlobalIndex(int index) { m_globalIndex = index; }
+
+    // Should not be overriden
+    int getGlobalIndex() { return m_globalIndex;}
+
+private:
+    int m_globalIndex;
+
 };
 
 typedef std::shared_ptr<PPAProfile_Base> PPAProfile_ptr;

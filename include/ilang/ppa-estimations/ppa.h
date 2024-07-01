@@ -14,6 +14,7 @@
 #include "ilang/ila/ast/expr_op.h"
 #include "ilang/ila/ast_hub.h"
 #include <cmath>
+#include "ilang/ppa-estimations/ppa_profile_base.h"
 #include "ppa_hardware_block.h"
 #include "ppa_model_registrar.h"
 #include <vcdparser/VCDFileParser.hpp>
@@ -50,9 +51,9 @@ public:
         bool reuseDivideBlocks = true;
         bool reuseRemainderBlocks = true;
 
-        /* How many of each hardware block can the circuit have (ignored for 
-         * blocks which aren't marked as reusable, in which case the required
-         * number of the block is instantiated) */
+        /* How many of each profile of each hardware block can the circuit have
+         * (ignored for blocks which aren't marked as reusable, in which case 
+         * the required number of the block is instantiated) */
 
         // TODO: Implement the use of these configuration parameters
         int maximumShifterBlocks;
@@ -98,15 +99,12 @@ private:
         // Tracks the largest value of any expression in the m_endTimes map
         double m_latestTime;
 
-        // Points to an array filled with the maximum number of each hw block
-        std::array<int, bNumBlockTypes> * m_maxOfEachBlock;
-
         // Tracks how many of each block have been used each cycle to enforce
         // configuration maximums
-        std::array<std::vector<int>, bNumBlockTypes> m_hardwareUseTracker;
+        std::vector<std::vector<int>> m_hardwareUseTracker;
 
         //
-        std::array<std::vector<int>, bNumBlockTypes> m_hardwareBlocksPerCycle;
+        // std::array<std::vector<int>, bNumBlockTypes> m_hardwareBlocksPerCycle;
     };
     typedef std::unique_ptr<PPAAnalysisData> PPAAnalysisData_ptr;
 
@@ -134,7 +132,7 @@ private:
      * execution being finished. `maximumArgReadyTime` is the earliest time at 
      * which `expr` can start, and uses the structures in `ppa_time_dat`. Fills
      * in start times */
-    double PerformanceSearchByOperation
+    double ScheduleAndCount
     (
         const ExprPtr & expr, 
         double maximumArgReadyTime,
@@ -158,11 +156,8 @@ private:
 
     /* Returns the type of hardware block which implements operation `op` */
     HardwareBlock_t UidToHardwareBlock(AstUidExprOp op);
-
-    /* Extracts the hardware blocks which are used by an expression (for which
-     * the timing has already been performed such that their ready times are 
-     * stored in `ppa_time_dat.m_endTimes`) */
-    void ExtractHardwareBlocks(PPAAnalysisData & ppa_time_dat);
+    /* Prints the hardware blocks which are being used */
+    void PrintHardwareBlocks(PPAAnalysisData & ppaData);
 
     const int m_countBlockTypes = HardwareBlock_t::bNumBlockTypes;
     const InstrLvlAbsPtr & m_ila;

@@ -19,8 +19,7 @@ private:
 
 public:
 
-    /* For timing and dynamic power checks, returns the operand bitwidth 
-     * for area and leakage power checks, returns the block bitwidth */
+    /* Returns the operand bitwidth */
     static int getBitwidth() { return s_m_bitwidth; }
 
     /* For dynamic power checks, returns the switching activity between 

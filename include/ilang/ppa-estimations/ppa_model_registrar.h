@@ -35,6 +35,9 @@ public:
      * before any other code is executed */
     void finalizeRegistrar();
 
+    /* Get the current size of the registrar */
+    int getSize(); 
+
     /* Returns the profile for the opType which has the lowest max bitwidth 
      * while still having a bitwidth greater than the bitwidth argument */
     PPAProfile_ptr getMatchingProfile_LowestBitwidth
@@ -52,6 +55,8 @@ private:
 
 
     RegistrarType m_registeredProfiles;
+
+    size_t m_numProfiles = 0;
 
 };
 

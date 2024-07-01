@@ -1,9 +1,10 @@
-#include "ilang/ila/ast/expr_op.h"
 #include "ilang/ppa-estimations/ppa_hardware_block.h"
 #include "ilang/ppa-estimations/ppa_profile_base.h"
 #include "ilang/ppa-estimations/ppa_profile_const_example.h"
 #include <ilang/ppa-estimations/ppa_model_registrar.h>
 #include <memory>
+#include <limits.h>
+#include <algorithm>
 
 namespace ilang
 {
@@ -14,16 +15,17 @@ PPA_Registrar::PPA_Registrar()
     typedef std::shared_ptr<PPAProfile_Const_Example> constProf_ptr;   
     
     constProf_ptr noHardwareProf {
-        std::make_shared<constProf>(0, 0, 0, 0, INT_MAX)
+        std::make_shared<constProf>(0, 0, 0, 0, INT_MAX, -1, false)
     };
+
+    registerProfile(noHardwareProf, bNoHardware);
 
     /* For now we don't model the memory use power */
     constProf_ptr memoryProf {
-        std::make_shared<constProf>(0, 0, 0, 0, INT_MAX)
+        std::make_shared<constProf>(0, 0, 0, 0, INT_MAX, -1, false)
     };
 
-    m_registeredProfiles.at(bNoHardware).emplace_back(noHardwareProf);
-    m_registeredProfiles.at(bMemory).emplace_back(memoryProf);
+    registerProfile(memoryProf, bMemory);
 
 }
 
@@ -38,6 +40,9 @@ void PPA_Registrar::registerProfile
     currentlySorted = false;
 
     m_registeredProfiles.at(opType).push_back(newProfile);
+
+    newProfile->setGlobalIndex(m_numProfiles);
+    m_numProfiles++;
 }
 
 /*****************************************************************************/
@@ -57,6 +62,13 @@ void PPA_Registrar::finalizeRegistrar()
     }
 
     currentlySorted = true;
+}
+
+/*****************************************************************************/
+
+int PPA_Registrar::getSize()
+{
+    return m_numProfiles;
 }
 
 /*****************************************************************************/
