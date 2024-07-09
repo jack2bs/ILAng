@@ -7,15 +7,26 @@
 #include "ppa_profile_base.h"
 #include "ppa_hardware_block.h"
 #include <ilang/util/log.h>
-#include <memory>
 
 namespace ilang
 {
 
-
+typedef std::array<std::vector<PPAProfile_ptr>, 
+        bNumBlockTypes> RegistrarType;
+        
 class PPA_Registrar
 {
+private:
 
+    bool currentlySorted = false;
+
+
+
+
+    RegistrarType m_registeredProfiles;
+
+    size_t m_numProfiles = 0;
+    
 public:
 
     PPA_Registrar();
@@ -46,17 +57,9 @@ public:
         int bitwidth
     );
 
-private:
-
-    bool currentlySorted = false;
-
-    typedef std::array<std::vector<PPAProfile_ptr>, 
-        bNumBlockTypes> RegistrarType;
+    RegistrarType * getRegisteredProfiles();
 
 
-    RegistrarType m_registeredProfiles;
-
-    size_t m_numProfiles = 0;
 
 };
 

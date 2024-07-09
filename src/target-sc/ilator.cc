@@ -865,6 +865,7 @@ bool Ilator::GenerateGlobalHeader(const std::string& dir) {
                  "#include <fstream>\n"
                  "#include <systemc.h>\n"
                  "#include <bitset>\n"
+                 "#include <unordered_map>\n"
 #ifdef ILATOR_PRECISE_MEM
                  "#include <map>\n"
 #else
@@ -882,7 +883,7 @@ bool Ilator::GenerateGlobalHeader(const std::string& dir) {
   if (vcd) { 
     fmt::format_to(buff, 
                    "  std::ofstream vcd_log;\n"
-                   "  std::map<std::string, std::string> vcd_map;\n");
+                   "  std::unordered_map<std::string, std::string> vcd_map;\n");
   }
   if (pwr) {
     fmt::format_to(buff,

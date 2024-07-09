@@ -654,7 +654,9 @@ void ExportAladdinSim(const Ila& ila, const std::string& dir_path,
 /******************************************************************************/
 /// \brief Generate PPA Analysis for the ILA
 /// \param [in] ila the top-level ILA to analyze
-void AnalyzeIlaPPA(const Ila& ila);
+void AnalyzeIlaPPA(const Ila& ila, double cycle_time,
+                   const std::string & instr_seq_path = "",
+                   const std::string & vcd_path = "");
 
 /******************************************************************************/
 // Verification.

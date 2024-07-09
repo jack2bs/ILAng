@@ -49,7 +49,7 @@ void PPA_Registrar::registerProfile
 
 bool sortComparator(const PPAProfile_ptr & profA, const PPAProfile_ptr & profB)
 {
-    return profA->getMaximumBitwidth() > profB->getMaximumBitwidth();
+    return profA->getMaximumBitwidth() < profB->getMaximumBitwidth();
 }
 
 /*****************************************************************************/
@@ -94,6 +94,13 @@ PPAProfile_ptr PPA_Registrar::getMatchingProfile_LowestBitwidth
 
     // Not reachable without error
     return *(m_registeredProfiles.at(opType).end());
+}
+
+/*****************************************************************************/
+
+RegistrarType * PPA_Registrar::getRegisteredProfiles()
+{
+    return &m_registeredProfiles;
 }
 
 }

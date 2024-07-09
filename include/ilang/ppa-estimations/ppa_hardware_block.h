@@ -18,6 +18,9 @@ enum HardwareBlock_t {
         bDivision,
         bMemory,
         bRemainder,
+        bRegisterHold,
+        bRegisterWrite,
+        bRegisterRead,
         bNumBlockTypes,
         bInvalid
 };

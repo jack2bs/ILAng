@@ -30,8 +30,18 @@ public:
     // Should not be overriden
     int getGlobalIndex() { return m_globalIndex;}
 
+    // Should not be overriden
+    void incNumInstances() { m_numInstances++; }
+
+    // Should not be overriden
+    void setNumInstances(int newNum) { m_numInstances = newNum; }
+
+    // Should not be overriden
+    int getNumInstances() { return m_numInstances; }
+
 private:
-    int m_globalIndex;
+    int m_globalIndex = 0;
+    int m_numInstances = 0;
 
 };
 
