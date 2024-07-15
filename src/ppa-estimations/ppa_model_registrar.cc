@@ -15,14 +15,18 @@ PPA_Registrar::PPA_Registrar()
     typedef std::shared_ptr<PPAProfile_Const_Example> constProf_ptr;   
     
     constProf_ptr noHardwareProf {
-        std::make_shared<constProf>(0, 0, 0, 0, INT_MAX, -1, false)
+        std::make_shared<constProf>(
+            0, 0, 0, 0, INT_MAX, -1, None, 0
+        )
     };
 
     registerProfile(noHardwareProf, bNoHardware);
 
     /* For now we don't model the memory use power */
     constProf_ptr memoryProf {
-        std::make_shared<constProf>(0, 0, 0, 0, INT_MAX, -1, false)
+        std::make_shared<constProf>(
+            0, 0, 0, 0, INT_MAX, -1, AcceleratorWide, 1
+        )
     };
 
     registerProfile(memoryProf, bMemory);

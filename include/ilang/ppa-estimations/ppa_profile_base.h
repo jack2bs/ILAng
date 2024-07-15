@@ -10,10 +10,19 @@
 namespace ilang
 {
 
+enum reuse_t
+{
+    None,
+    AcceleratorWide,
+    InstructionWide
+};
+
 class PPAProfile_Base
 {
 
 public:
+
+
 
     virtual double getBlockTime() = 0;
     virtual double getBlockDynamicPower() = 0;
@@ -22,7 +31,8 @@ public:
     virtual int getMaximumBitwidth() = 0;
 
     virtual int getMaximumInstances() = 0;
-    virtual bool getIsReusable() = 0;
+    virtual reuse_t getIsReusable() = 0;
+    virtual int getNumInputs() = 0;
 
     // Should not be overriden
     void setGlobalIndex(int index) { m_globalIndex = index; }
@@ -31,7 +41,7 @@ public:
     int getGlobalIndex() { return m_globalIndex;}
 
     // Should not be overriden
-    void incNumInstances() { m_numInstances++; }
+    void incNumInstances(int incBy = 1) { m_numInstances += incBy; }
 
     // Should not be overriden
     void setNumInstances(int newNum) { m_numInstances = newNum; }
@@ -39,9 +49,19 @@ public:
     // Should not be overriden
     int getNumInstances() { return m_numInstances; }
 
+    // Should not be overriden
+    void incUniqueUses(int incBy = 1) { m_numUniqueUses += incBy; }
+
+    // Should not be overriden
+    void setUniqueUses(int newNum) { m_numUniqueUses = newNum; }
+
+    // Should not be overriden
+    int getUniqueUses() { return m_numUniqueUses; }
+
 private:
     int m_globalIndex = 0;
     int m_numInstances = 0;
+    int m_numUniqueUses = 0;
 
 };
 

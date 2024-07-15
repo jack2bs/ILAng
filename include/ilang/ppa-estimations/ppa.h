@@ -42,20 +42,24 @@ public:
         /* The default number of ports on the memory */
         int defaultNumMemoryPorts = 2;
 
+        /* Should operations be pushed back to even out the number of blocks
+         * being used? */
+        bool pushBackToEqualize = true;
 
         /* How should implicit register count be estimated? */
         enum regCountMethods 
         {
-            /* Slow hardware blocks are adders, shifters, multipliers, 
-             * dividers and remainderers*/
+            /* Not recommended, massive undercount */
             CountSlowHardWareBlocks,
 
-            /* Not recommended can be inaccurate for off critical path times */
+            /* Can be inaccurate for off critical path times */
             CountCarriedOverCycleBoundaries
-        } regCountMethod = CountSlowHardWareBlocks;
+        } regCountMethod = CountCarriedOverCycleBoundaries;
 
         /* Not recommended, significantly overestimates the # of registers */
-        bool PutConstantsInRegisters = false;
+        bool PutConstantsInRegisters = true;
+        bool PutInputsInRegisters = true;
+
 
     };
 
@@ -100,6 +104,13 @@ private:
         // The hardware profile mapped to each expression
         std::unordered_map<ExprPtr, PPAProfile_ptr> m_profiles;
 
+        // Maintain a list of parents for each expression
+        std::unordered_map<ExprPtr, std::unique_ptr<std::vector<ExprPtr>>> 
+            m_parents;
+
+        // Maintain a list of expressions without parents
+        std::unordered_set<ExprPtr> m_topExpressions;
+
         // Maps each memory expression to it's underlying memory partition's 
         // timing tracker 
         std::unordered_map<ExprPtr, std::shared_ptr<std::vector<int>>> 
@@ -107,6 +118,13 @@ private:
 
         // Tracks the largest value of any expression in the m_endTimes map
         double m_latestTime;
+        int m_latestTimeInCycles;
+
+        // Tracks the average dynamic power per cycle
+        double m_dynPower;
+
+        // Workload specific active cycles
+        int m_activeCycles = 0;
 
         // Tracks how many of each block have been used each cycle to enforce
         // configuration maximums
@@ -115,8 +133,6 @@ private:
         // Tracker for dynamic programming for the HasLoadFromStore check
         std::unordered_set<const ExprPtr *> m_hasLoadFromStoreVisited;
 
-        //
-        // std::array<std::vector<int>, bNumBlockTypes> m_hardwareBlocksPerCycle;
     };
     typedef std::unique_ptr<PPAAnalysisData> PPAAnalysisData_ptr;
 
@@ -134,12 +150,47 @@ private:
     /* Returns the time `expr` can begin execution. `maximumArgReadyTime` is 
      * the earliest time at which all args for `expr` can be ready. Uses the 
      * structures in `ppa_time_dat`. */
-    double ScheduleAndCount
+    double FirstSchedule
     (
         const ExprPtr & expr, 
         double maximumArgReadyTime,
         PPAAnalysisData & ppa_time_dat
     );
+
+    /* The helper function which actually moves the hw blocks for 
+     * `PushExpressionsLater`. */
+    void MoveLater
+    (
+        const ExprPtr & expr,
+        double exprStartTime,
+        PPAAnalysisData & ppaData
+    );
+
+    /* Reschedules operations to more evenly fill out the time. This is 
+     * necessary to avoid overestimating the number of a given block required
+     * at the beginning a schedule, when the bottleneck occurs later in the 
+     * datapath. */
+    void PushExpressionsLater(PPAAnalysisData & ppaData);
+
+    /* Counts the number of explicit registers required for implementing the
+     * accelerator's state and inputs. Inputs are only buffered into 
+     * architectural registers at the request of the user in the configuration. 
+     */
+    void CountStateAndInputRegisters();
+
+    /* Counts the number of implicit registers required for implementing
+     * the schedule stored in `ppaData`. These implicit registers are required
+     * any time data crosses over a cycle boundary. */
+    void CountRegistersSpanning
+    (
+        const ExprPtr & expr,
+        PPAAnalysisData & ppaData
+    );
+
+    /* Extracts the number of each hardware block required by the schedule
+     * in `ppaData` at the time of calling. Updates the PPA profiles based on
+     * the information. */
+    void CountHardwareBlocks(PPAAnalysisData & ppaData);
 
     /* Initializes `ppa_time_dat` with tracking vectors for all memory states
      * and resizes the hardware block tracking vector with the number of 
@@ -147,7 +198,8 @@ private:
     void AnalysisDataInitialize(PPAAnalysisData & ppa_time_dat);
 
     /* Cleans up the tracking vectors in `ppa_time_dat` */
-    void AnalysisDataDelete(PPAAnalysisData & ppa_time_dat);
+    // Currently DELETED
+    // void AnalysisDataDelete(PPAAnalysisData & ppa_time_dat);
 
     /* Removes duplicates from `topExpr` according to the list in `set`. 
      * `CheckedMap` is used as a visited list (dynamic programming) to speed up
@@ -159,13 +211,21 @@ private:
         std::unordered_map<uint64_t, const ExprPtr> & checkedMap
     );
 
+    /* Returns the type of hardware block for expr */
+    HardwareBlock_t ExprToHardwareBlocks(const ExprPtr & expr);
+
+
     // TODO : downgrading operations with constant operands
     /* Returns the type of hardware block which implements operation `op` */
     HardwareBlock_t UidToHardwareBlock(AstUidExprOp op);
 
     /* Prints the hardware blocks which are being used (debugging, big 
      * performance hit) */
-    void PrintHardwareBlocks(PPAAnalysisData & ppaData);
+    void PrintHardwareBlocks
+    (
+        PPAAnalysisData & ppaData,
+        const std::string & label
+    );
 
     /* Fills in m_instrSequence based on data in file : m_instrSeqPath 
      * returns true if m_instrSeqPath could be opened, false otherwise */
@@ -176,19 +236,22 @@ private:
      * dividers, remainderers, and the number of memory ports */
     void RegCountSlowHwBlocks();
 
-    /* */
+    /* Creates a VCDFile object with the file in m_vcdPath. Stores the
+     * VCDFile object in m_vcdStatistics. Fills m_refToHash with the hashes for
+     * each signal in the VCD file. */
     bool MakeVcd();
 
-    /* */
+    /* Estimates the number of multiplexers required by the reused hardware 
+     * blocks. Counts are stored in the multiplexer PPA profiles */
+    void CountMultiplexers();
+
+    /* Use the data to generate the final PPA estimates for the accelerator. */
     void FinalizeEstimates
     (
         std::unordered_map<std::string, PPAAnalysisData_ptr> & ppaData,
         bool hadInstrSeq,
         bool hadVcd
     );
-
-    /* */
-    void AddToConstDirectory(const ExprPtr & expr);
 
     const int m_countBlockTypes = HardwareBlock_t::bNumBlockTypes;
     const InstrLvlAbsPtr & m_ila;
@@ -201,7 +264,6 @@ private:
     const std::string & m_vcdPath;
     VCDFile * m_vcdStatistics;
     std::unordered_map<VCDSignalReference, VCDSignalHash*> m_refToHash;
-    std::set<uint64_t> m_constDirectory;
     std::vector<ExprPtr> m_memVars;
 
 

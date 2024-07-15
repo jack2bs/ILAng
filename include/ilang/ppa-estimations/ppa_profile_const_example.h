@@ -14,7 +14,8 @@ private:
     double m_blockArea;
     int m_maximumBitwidth;
     int m_maximumInstances;
-    bool m_isReusable;
+    reuse_t m_isReusable;
+    int m_numInputs;
 
 public:
     PPAProfile_Const_Example
@@ -25,7 +26,8 @@ public:
         double blockArea,
         int maximumBitwidth,
         int maximumInstances,
-        bool isReusable
+        reuse_t isReusable,
+        int numInputs
     ) : 
     m_blockTime(blockTime),
     m_blockDynamicPower(blockDynamicPower),
@@ -33,7 +35,8 @@ public:
     m_blockArea(blockArea),
     m_maximumBitwidth(maximumBitwidth),
     m_maximumInstances(maximumInstances),
-    m_isReusable(isReusable)
+    m_isReusable(isReusable),
+    m_numInputs(numInputs)
     {};
 
     double getBlockTime() override { return m_blockTime; }
@@ -42,7 +45,8 @@ public:
     double getBlockArea() override { return m_blockArea; }
     int getMaximumBitwidth() override { return m_maximumBitwidth; }
     int getMaximumInstances() override { return m_maximumInstances; }
-    bool getIsReusable() override { return m_isReusable; }
+    reuse_t getIsReusable() override { return m_isReusable; }
+    int getNumInputs() override { return m_numInputs; }
 
 };
 
