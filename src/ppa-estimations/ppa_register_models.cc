@@ -3,6 +3,7 @@
 #include "ilang/ppa-estimations/ppa_profile_base.h"
 #include <ilang/ppa-estimations/ppa_model_registrar.h>
 #include <ilang/ppa-estimations/ppa_profile_const_example.h>
+#include <ilang/ppa-estimations/ppa_profile_simple_example.h>
 #include <memory>
 #include <climits>
 #include <ilang/ppa-estimations/ppa_callbacks.h>
@@ -12,6 +13,9 @@ namespace ilang
 
 typedef PPAProfile_Const_Example constProf;
 typedef std::shared_ptr<PPAProfile_Const_Example> constProf_ptr;
+
+typedef PPAProfile_Simple_Example simpleProf;
+typedef std::shared_ptr<PPAProfile_Simple_Example> simpleProf_ptr;
 
 void registerAllModels(PPA_Registrar & registrar)
 {
@@ -36,6 +40,9 @@ void registerAllModels(PPA_Registrar & registrar)
         std::make_shared<constProf>(5612, 203004.908, 27450.345, 833.176, 32, 1, AcceleratorWide, 2)
     };
 
+    simpleProf_ptr shifter_32 {
+        std::make_shared<simpleProf>(69, 205.67323147552182, 244.15774916682975, 8.602, 32, INT_MAX, AcceleratorWide, 2)
+    };
 
     registrar.registerProfile(shifter_32b, bShifter);
     registrar.registerProfile(adder_32b, bAddition);
