@@ -1288,6 +1288,11 @@ const ExprPtr * findDuplicates
         {
             key |= (e->arg(i)->name().id() & 0x7ffffUL) << (i * 19);
         }
+        for (int i = 0; i < e->param_num(); i++)
+        {
+            key |= (e->param(i) & 0x7ffffUL) << (38 - (i * 19));
+        }
+
         key |= (asthub::GetUidExprOp(e) & 0x3fUL) << 57UL;
     }
     else if (e->is_const())
@@ -1331,6 +1336,12 @@ const ExprPtr * findDuplicates
             {
                 theyMatch &=
                     (e->arg(i)->name().id() == match->arg(i)->name().id());
+            }
+            int params = e->param_num();
+            for (int i = 0; i < params; i++)
+            {
+                theyMatch &=
+                    (e->param(i) == match->param(i));
             }
             if (theyMatch)
             {

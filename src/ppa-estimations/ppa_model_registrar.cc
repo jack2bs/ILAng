@@ -93,7 +93,7 @@ PPAProfile_ptr PPA_Registrar::getMatchingProfile_LowestBitwidth
         }
     }
 
-    ILA_ERROR << "No profile can handle " << hardwareBlockToString(opType)
+    ILA_ASSERT(false) << "No profile can handle " << hardwareBlockToString(opType)
         << " with a bitwidth = " << bitwidth;
 
     // Not reachable without error
