@@ -70,3 +70,6 @@ tags
 
 # Cache
 .cache
+
+# Todo list
+todo.txt

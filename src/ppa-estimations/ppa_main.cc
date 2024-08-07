@@ -1968,6 +1968,9 @@ PPAAnalyzer::PPAAnalyzer
       m_vcdPath(vcd_path)
 {
 
+    std::chrono::time_point<std::chrono::system_clock> st 
+        = std::chrono::system_clock::now();
+
     m_configuration = {
         .pipelineStartAtCycleBoundary = true,
 
@@ -2001,6 +2004,13 @@ PPAAnalyzer::PPAAnalyzer
     registerAllModels(m_registrar);
 
     PPAAnalyze();
+
+    std::chrono::time_point<std::chrono::system_clock> en 
+        = std::chrono::system_clock::now();
+
+    std::chrono::duration<float> difference = en - st;
+
+    ILA_INFO << "PPA time taken in seconds: " << difference.count();
 }
 
 /*****************************************************************************/
@@ -2016,6 +2026,8 @@ PPAAnalyzer::PPAAnalyzer
       m_instrSeqPath(instr_seq_path), m_vcdPath (vcd_path)
 {
 
+    std::chrono::time_point<std::chrono::system_clock> st 
+        = std::chrono::system_clock::now();
 
     ILA_ASSERT(m_configuration.shortOperationLengthThreshold <= 1.0) 
         << "Short operation threshold is too large";
@@ -2023,6 +2035,13 @@ PPAAnalyzer::PPAAnalyzer
     registerAllModels(m_registrar);
 
     PPAAnalyze();
+
+    std::chrono::time_point<std::chrono::system_clock> en 
+        = std::chrono::system_clock::now();
+
+    std::chrono::duration<float> difference = en - st;
+
+    ILA_INFO << "PPA time taken in seconds: " << difference.count();
 }
 
 }
