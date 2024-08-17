@@ -4,10 +4,12 @@
 #ifndef ILANG_ILANG_CPP_H__
 #define ILANG_ILANG_CPP_H__
 
+#include "ilang/ila/instr.h"
 #include <cstdint>
 #include <map>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <z3++.h>
@@ -652,6 +654,46 @@ void ExportAladdinSim(const Ila& ila, const std::string& dir_path,
 /******************************************************************************/
 // Analysis
 /******************************************************************************/
+
+class IlaModule {
+
+public:
+
+
+  /* If two simulataneous instructions update the same state, hardware is 
+   * instantiated for both updates. 
+   * 
+   * If simultaneous instructions read a state which is updated by one or more 
+   * instructions with a smaller start time offset, then we mark that state's
+   * ready time as the `max(offset, endtime_1, endtime_2, ...)` */
+  class SimultaneousInstrs {
+  public:
+
+    // Constructor for a simultaneous set with just one instruction
+    SimultaneousInstrs(InstrPtr inst) 
+      { m_instrMapToOffset.insert({inst, 0}); }
+
+    void addInstr(const InstrPtr& inst, unsigned offsetInCycles) 
+      { m_instrMapToOffset.insert({inst, offsetInCycles}); }
+
+  private:
+
+    std::unordered_map<InstrPtr, unsigned> m_instrMapToOffset;
+
+  };
+
+  void addInstrs(const SimultaneousInstrs& inst) { m_module.push_back(inst); }
+
+private:
+  // Should the valid functions for the each instruction's host ILA be included
+  bool m_includesValidChecking;
+
+  // A vector of instructions in the module
+  std::vector<SimultaneousInstrs> m_module;
+
+};
+typedef IlaModule::SimultaneousInstrs SimultaneousInstrs;
+
 /// \brief Generate PPA Analysis for the ILA
 /// \param [in] ila the top-level ILA to analyze
 void AnalyzeIlaPPA(const Ila& ila, double cycle_time,
