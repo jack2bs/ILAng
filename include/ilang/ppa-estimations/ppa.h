@@ -60,6 +60,11 @@ public:
         bool PutConstantsInRegisters = true;
         bool PutInputsInRegisters = true;
 
+        /* If the instruction sequence given uses an instruction which is 
+         * instantiated in hardware multiple times, should each instantiation
+         * be used. If false, then in order to meaningfully use an instruction
+         * sequence, no instruction can be instantiated twice. */
+        bool instrSequenceRunEachInstance = true;
 
     };
 
